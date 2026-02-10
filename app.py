@@ -1,1878 +1,1901 @@
+# ============================================================================
+# 1. CORE IMPORTS & CONFIGURATION (STREAMLIT ADAPTED)
+# ============================================================================
+import warnings
 import streamlit as st
-import pandas as pd
 import numpy as np
+import pandas as pd
+import yfinance as yf
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
-import requests
+import scipy.stats as stats 
+import matplotlib.pyplot as plt
+import seaborn as sns
+import matplotlib
+matplotlib.use('Agg')
+
+# PyPortfolioOpt libraries
+from pypfopt import expected_returns, risk_models, EfficientFrontier
+from pypfopt import CLA
+from pypfopt import EfficientCVaR
+from pypfopt import HRPOpt
+from pypfopt import objective_functions
+
+# Additional quantitative libraries
+from scipy.optimize import minimize
+from scipy.stats import norm, t, skew, kurtosis
 import warnings
-from scipy import stats
-from scipy.stats import norm
-import statsmodels.api as sm
-from statsmodels.tsa.stattools import adfuller, kpss
 warnings.filterwarnings('ignore')
 
-# Page configuration
+# ARCH: For Econometric Volatility Forecasting (GARCH)
+try:
+    from arch import arch_model
+    HAS_ARCH = True
+except ImportError:
+    HAS_ARCH = False
+
+# Streamlit Page Configuration
 st.set_page_config(
-    page_title="Institutional Fund Flow Analytics",
-    page_icon="📊",
+    page_title="BIST Portfolio Risk Analytics | Institutional Platform",
     layout="wide",
+    page_icon="📈",
     initial_sidebar_state="expanded"
 )
 
-# Professional, clean CSS with enhanced styling
+# Custom CSS for professional styling
 st.markdown("""
 <style>
     .main-header {
-        font-size: 2.8rem;
-        color: #1a1a1a;
-        font-weight: 600;
-        margin-bottom: 0.5rem;
-        letter-spacing: -0.5px;
-        border-bottom: 2px solid #e0e0e0;
-        padding-bottom: 1rem;
+        font-size: 2.5rem;
+        color: #1E3A8A;
+        font-weight: 700;
+        margin-bottom: 1rem;
     }
     .sub-header {
-        font-size: 1.2rem;
-        color: #666666;
-        margin-bottom: 2rem;
-        font-weight: 400;
-    }
-    .section-header {
         font-size: 1.5rem;
-        color: #2c3e50;
+        color: #374151;
         font-weight: 600;
-        margin: 2rem 0 1.2rem 0;
+        margin-top: 1.5rem;
+        margin-bottom: 1rem;
+        border-bottom: 2px solid #E5E7EB;
         padding-bottom: 0.5rem;
-        border-bottom: 1px solid #e0e0e0;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-    .date-indicator {
-        font-size: 0.9rem;
-        color: #666666;
-        font-weight: 400;
-        background: #f8f9fa;
-        padding: 4px 12px;
-        border-radius: 4px;
-        border: 1px solid #e0e0e0;
     }
     .metric-card {
-        background: #ffffff;
-        border-radius: 8px;
-        padding: 1.2rem;
-        margin-bottom: 1rem;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-        border: 1px solid #f0f0f0;
+        background-color: #F9FAFB;
+        border-radius: 10px;
+        padding: 1rem;
+        border-left: 4px solid #3B82F6;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
-    .metric-value {
-        font-size: 1.8rem;
-        font-weight: 600;
-        color: #2c3e50;
-        margin: 0.3rem 0;
-    }
-    .metric-label {
-        font-size: 0.85rem;
-        color: #666666;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        font-weight: 500;
-    }
-    .trend-indicator {
-        display: inline-flex;
-        align-items: center;
-        padding: 3px 10px;
-        border-radius: 12px;
-        font-size: 0.85rem;
-        font-weight: 500;
-        margin-left: 8px;
-    }
-    .trend-up {
-        background-color: #e8f5e9;
-        color: #2e7d32;
-    }
-    .trend-down {
-        background-color: #ffebee;
-        color: #c62828;
-    }
-    .trend-neutral {
-        background-color: #f5f5f5;
-        color: #666666;
-    }
-    .flow-indicator {
-        display: inline-flex;
-        align-items: center;
-        padding: 4px 12px;
-        border-radius: 16px;
-        font-size: 0.85rem;
-        font-weight: 600;
-        margin: 0 4px;
-    }
-    .flow-in {
-        background-color: rgba(39, 174, 96, 0.1);
-        color: #27ae60;
-        border: 1px solid rgba(39, 174, 96, 0.3);
-    }
-    .flow-out {
-        background-color: rgba(231, 76, 60, 0.1);
-        color: #e74c3c;
-        border: 1px solid rgba(231, 76, 60, 0.3);
-    }
-    .chart-container {
-        background: #ffffff;
-        border-radius: 8px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-        border: 1px solid #f0f0f0;
-    }
-    .analysis-card {
-        background: #f8f9fa;
+    .warning-box {
+        background-color: #FEF3C7;
+        border: 1px solid #F59E0B;
         border-radius: 8px;
         padding: 1rem;
-        margin: 0.5rem 0;
-        border-left: 4px solid #2c3e50;
+        margin: 1rem 0;
+    }
+    .success-box {
+        background-color: #D1FAE5;
+        border: 1px solid #10B981;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
     }
     .stTabs [data-baseweb="tab-list"] {
-        gap: 0.5rem;
-        padding: 0.5rem 0;
-        border-bottom: 2px solid #e0e0e0;
-        background: transparent;
+        gap: 8px;
     }
     .stTabs [data-baseweb="tab"] {
-        height: 44px;
-        padding: 0 24px;
-        border-radius: 6px;
-        background: #f8f9fa;
-        border: 1px solid #dee2e6;
-        font-weight: 500;
-        color: #495057;
-        font-size: 0.9rem;
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: #F3F4F6;
+        border-radius: 4px 4px 0px 0px;
+        gap: 1px;
+        padding-top: 10px;
+        padding-bottom: 10px;
     }
     .stTabs [aria-selected="true"] {
-        background: #2c3e50 !important;
+        background-color: #3B82F6 !important;
         color: white !important;
-        border: 1px solid #2c3e50 !important;
     }
-    .footer {
-        text-align: center;
-        padding: 2rem;
-        color: #666666;
-        font-size: 0.85rem;
-        margin-top: 3rem;
-        border-top: 1px solid #e0e0e0;
-    }
-    .api-status {
-        padding: 8px 12px;
-        border-radius: 6px;
-        font-size: 0.85rem;
-        font-weight: 500;
-        margin-bottom: 10px;
-    }
-    .api-active {
-        background-color: #e8f5e9;
-        color: #2e7d32;
-        border: 1px solid #c8e6c9;
-    }
-    .api-inactive {
-        background-color: #ffebee;
-        color: #c62828;
-        border: 1px solid #ffcdd2;
-    }
-    .data-source-badge {
-        display: inline-block;
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-size: 0.75rem;
-        font-weight: 500;
-        margin-left: 8px;
-    }
-    .badge-fred {
-        background-color: #e3f2fd;
-        color: #1565c0;
-        border: 1px solid #bbdefb;
-    }
-    .badge-sample {
-        background-color: #f3e5f5;
-        color: #7b1fa2;
-        border: 1px solid #e1bee7;
-    }
-    .kpi-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 1rem;
-        margin-bottom: 1.5rem;
-    }
-    .kpi-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    .plot-container {
+        background-color: white;
         border-radius: 10px;
-        padding: 1.5rem;
-        color: white;
+        padding: 1rem;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    .kpi-card-secondary {
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        border-radius: 10px;
-        padding: 1.5rem;
-        color: white;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    .kpi-card-tertiary {
-        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-        border-radius: 10px;
-        padding: 1.5rem;
-        color: white;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        margin: 1rem 0;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Professional header
-st.markdown('<h1 class="main-header">Institutional Fund Flow Analytics</h1>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Professional Analysis of Mutual Fund Assets & Flow Dynamics</p>', unsafe_allow_html=True)
+# Turkish BIST 30 tickers
+BIST30_TICKERS = [
+    'AKBNK.IS', 'ARCLK.IS', 'ASELS.IS', 'BIMAS.IS', 'DOHOL.IS',
+    'EKGYO.IS', 'EREGL.IS', 'FROTO.IS', 'GARAN.IS', 'HALKB.IS',
+    'ISCTR.IS', 'KCHOL.IS', 'KOZAA.IS', 'KOZAL.IS', 'KRDMD.IS',
+    'PETKM.IS', 'PGSUS.IS', 'SAHOL.IS', 'SASA.IS', 'SISE.IS',
+    'SKBNK.IS', 'TCELL.IS', 'THYAO.IS', 'TKFEN.IS', 'TOASO.IS',
+    'TTKOM.IS', 'TUPRS.IS', 'ULKER.IS', 'VAKBN.IS', 'YKBNK.IS'
+]
 
-# FRED API Configuration - VALID API KEY
-FRED_API_KEY = "4a03f808f3f4fea5457376f10e1bf870"
-FRED_BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
+# Annualized risk-free rate for Turkey (updated for 2024)
+RISK_FREE_RATE = 0.42  # Updated to reflect current Turkish rates ~42%
 
-# Test the API key
-def test_fred_api():
-    """Test if FRED API key is valid"""
-    try:
-        # Use a known working series ID for testing
-        test_params = {
-            'series_id': 'TOTALSL',
-            'api_key': FRED_API_KEY,
-            'file_type': 'json',
-            'limit': 1
-        }
-        response = requests.get(FRED_BASE_URL, params=test_params, timeout=10)
+# ============================================================================
+# 2. ENHANCED TURKISH PORTFOLIO OPTIMIZER CLASS
+# ============================================================================
+
+class TurkishPortfolioOptimizer:
+    def __init__(self):
+        self.tickers = BIST30_TICKERS
+        self.benchmark_tickers = ['XU100.IS', 'XU030.IS']
+        self.risk_free_rate = RISK_FREE_RATE
+        self.data = None
+        self.returns = None
+        self.benchmark_data = None
+        self.benchmark_returns = None
         
-        if response.status_code == 200:
-            return True, "✅ FRED API Key is valid and working"
-        elif response.status_code == 400:
-            # Try another series
-            test_params['series_id'] = 'SP500'
-            response = requests.get(FRED_BASE_URL, params=test_params, timeout=10)
-            if response.status_code == 200:
-                return True, "✅ FRED API Key is valid and working"
-            else:
-                return False, "❌ Invalid FRED API Key or series ID"
-        elif response.status_code == 429:
-            return False, "⚠️ API rate limit exceeded"
-        else:
-            return False, f"⚠️ API Error: {response.status_code}"
-    except Exception as e:
-        return False, f"⚠️ Connection Error: {str(e)}"
-
-# UPDATED FRED Series IDs with VERIFIED working series from FRED
-FRED_SERIES = {
-    'Total Mutual Fund Assets': {
-        'fred_id': 'TOTALSL',
-        'description': 'Total Mutual Fund Assets',
-        'category': 'Total Assets',
-        'unit': 'Millions of Dollars',
-        'source': 'Board of Governors of the Federal Reserve System',
-        'color': '#2c3e50',
-        'start_year': 1984,
-        'available_frequencies': ['monthly']
-    },
-    'Money Market Funds': {
-        'fred_id': 'MMMFFAQ027S',
-        'description': 'Money Market Fund Assets',
-        'category': 'Money Market',
-        'unit': 'Millions of Dollars',
-        'source': 'Board of Governors of the Federal Reserve System',
-        'color': '#3498db',
-        'start_year': 2007,
-        'available_frequencies': ['weekly', 'monthly']
-    },
-    'Equity Fund Assets': {
-        'fred_id': 'EQTA',  # Changed from FME to EQTA (Total Equity Market Assets)
-        'description': 'Total Equity Market Assets',
-        'category': 'Equity',
-        'unit': 'Millions of Dollars',
-        'source': 'Board of Governors of the Federal Reserve System',
-        'color': '#27ae60',
-        'start_year': 1945,
-        'available_frequencies': ['quarterly']
-    },
-    'Bond Fund Assets': {
-        'fred_id': 'NCBDBIQ027S',  # Changed from WSHOBL to NCBDBIQ027S (Corporate Bonds)
-        'description': 'Corporate Bonds; Debt Securities; Asset',
-        'category': 'Fixed Income',
-        'unit': 'Millions of Dollars',
-        'source': 'Board of Governors of the Federal Reserve System',
-        'color': '#e74c3c',
-        'start_year': 1945,
-        'available_frequencies': ['quarterly']
-    },
-    'Corporate Bonds': {
-        'fred_id': 'NCBCEL',  # Corporate Bonds; Liability
-        'description': 'Corporate Bond Liabilities',
-        'category': 'Corporate Bonds',
-        'unit': 'Millions of Dollars',
-        'source': 'Board of Governors of the Federal Reserve System',
-        'color': '#e67e22',
-        'start_year': 1945,
-        'available_frequencies': ['quarterly']
-    },
-    'Treasury Securities': {
-        'fred_id': 'TCMAH',  # Changed from TREAS to TCMAH (Treasury Bills)
-        'description': 'Treasury Bills; Asset',
-        'category': 'Government Bonds',
-        'unit': 'Millions of Dollars',
-        'source': 'Board of Governors of the Federal Reserve System',
-        'color': '#9b59b6',
-        'start_year': 1945,
-        'available_frequencies': ['quarterly']
-    },
-    'Mutual Fund Shares': {
-        'fred_id': 'NCBEMFMQ027S',  # Changed from HNOREMFQ027S
-        'description': 'Mutual Fund Shares; Asset',
-        'category': 'Mutual Funds',
-        'unit': 'Millions of Dollars',
-        'source': 'Board of Governors of the Federal Reserve System',
-        'color': '#1abc9c',
-        'start_year': 1945,
-        'available_frequencies': ['quarterly']
-    },
-    'Total Debt Securities': {
-        'fred_id': 'TCMILBS',
-        'description': 'Total Debt Securities',
-        'category': 'Debt',
-        'unit': 'Millions of Dollars',
-        'source': 'Board of Governors of the Federal Reserve System',
-        'color': '#f39c12',
-        'start_year': 1945,
-        'available_frequencies': ['quarterly']
-    }
-}
-
-PROFESSIONAL_COLORS = ['#2c3e50', '#3498db', '#27ae60', '#e74c3c', '#9b59b6', '#f39c12', '#1abc9c', '#34495e', '#e67e22']
-
-@st.cache_data(ttl=3600)
-def fetch_fred_data(series_id, start_date, end_date, frequency='monthly'):
-    """Fetch actual data from FRED API with proper error handling"""
-    try:
-        # FRED API parameters
-        params = {
-            'series_id': series_id,
-            'api_key': FRED_API_KEY,
-            'file_type': 'json',
-            'observation_start': start_date,
-            'observation_end': end_date,
-            'units': 'lin'
-        }
-        
-        # Make API request
-        response = requests.get(FRED_BASE_URL, params=params, timeout=30)
-        
-        if response.status_code == 200:
-            data = response.json()
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def fetch_data(_self, start_date='2022-01-01', end_date=None):
+        """Fetch data from Yahoo Finance with enhanced error handling"""
+        if end_date is None:
+            end_date = datetime.now().strftime('%Y-%m-%d')
             
-            if 'observations' in data and data['observations']:
-                # Extract data
-                dates = []
-                values = []
+        try:
+            # Download BIST 30 stocks with progress
+            with st.spinner(f"Downloading data from {start_date} to {end_date}..."):
+                data = yf.download(_self.tickers, start=start_date, end=end_date, 
+                                 progress=False, group_by='ticker')
                 
-                for obs in data['observations']:
-                    # Skip entries with '.' (FRED's notation for missing data)
-                    if obs['value'] != '.':
-                        dates.append(pd.to_datetime(obs['date']))
-                        try:
-                            # Convert to millions if needed
-                            value = float(obs['value'])
-                            values.append(value)
-                        except ValueError:
-                            continue
-                
-                if dates and values:
-                    # Create DataFrame
-                    df = pd.DataFrame({
-                        'Value': values
-                    }, index=dates)
-                    
-                    # Sort by date
-                    df = df.sort_index()
-                    
-                    # Resample based on requested frequency
-                    if frequency == 'weekly':
-                        # Convert to weekly data (Friday)
-                        df = df.resample('W-FRI').last().dropna()
-                    elif frequency == 'monthly':
-                        # Convert to monthly data (end of month)
-                        df = df.resample('M').last().dropna()
-                    elif frequency == 'quarterly':
-                        # Convert to quarterly data
-                        df = df.resample('Q').last().dropna()
-                    
-                    return df, 'FRED'
+                # Handle different data structure formats
+                if isinstance(data.columns, pd.MultiIndex):
+                    data = data['Adj Close']
                 else:
-                    return None, 'No valid data points'
+                    # Try to get adjusted close if single column structure
+                    data = data['Adj Close'] if 'Adj Close' in data.columns else data['Close']
+                
+                # Download benchmark indices
+                benchmark_data = yf.download(_self.benchmark_tickers, start=start_date, 
+                                           end=end_date, progress=False)
+                
+                if isinstance(benchmark_data.columns, pd.MultiIndex):
+                    benchmark_data = benchmark_data['Adj Close']
+                else:
+                    benchmark_data = benchmark_data['Adj Close'] if 'Adj Close' in benchmark_data.columns else benchmark_data['Close']
+            
+            # Forward fill missing values (business days only)
+            data = data.ffill().bfill()
+            benchmark_data = benchmark_data.ffill().bfill()
+            
+            # Filter stocks with sufficient data (minimum 80% non-NA)
+            min_days_required = int(len(data) * 0.8)
+            valid_tickers = data.columns[data.notna().sum() > min_days_required]
+            data = data[valid_tickers]
+            
+            if data.empty:
+                st.error("No valid tickers found with sufficient data. Please adjust date range.")
+                return None, None, None, None
+            
+            # Calculate daily returns with log returns for better statistical properties
+            returns = np.log(data / data.shift(1)).dropna()
+            benchmark_returns = np.log(benchmark_data / benchmark_data.shift(1)).dropna()
+            
+            return data, returns, benchmark_data, benchmark_returns
+            
+        except Exception as e:
+            st.error(f"Error fetching data: {str(e)}")
+            return None, None, None, None
+    
+    def calculate_enhanced_metrics(self, weights_series: pd.Series, returns: pd.DataFrame, 
+                                  benchmark_returns: pd.DataFrame, risk_free_rate: float):
+        """Calculate comprehensive portfolio performance metrics"""
+        
+        # Convert annual risk-free rate to daily
+        daily_rf = np.log(1 + risk_free_rate) / 252
+        
+        # Ensure weights are aligned and normalized
+        aligned_weights = weights_series.reindex(returns.columns).fillna(0)
+        aligned_weights = aligned_weights / aligned_weights.sum()  # Ensure sum to 1
+        
+        # Portfolio return series
+        portfolio_returns = (returns * aligned_weights).sum(axis=1)
+        
+        # Basic statistics
+        mean_return = portfolio_returns.mean()
+        volatility = portfolio_returns.std()
+        
+        # Annualized metrics (252 trading days)
+        annual_return = mean_return * 252
+        annual_volatility = volatility * np.sqrt(252)
+        
+        # Sharpe Ratio (annualized)
+        sharpe_ratio = (annual_return - risk_free_rate) / annual_volatility if annual_volatility > 0 else 0
+        
+        # Maximum Drawdown with dates
+        cum_returns = np.exp(portfolio_returns.cumsum())
+        running_max = cum_returns.cummax()
+        drawdown = (cum_returns - running_max) / running_max
+        max_drawdown = drawdown.min()
+        max_dd_date = drawdown.idxmin() if not drawdown.empty else None
+        recovery_date = None
+        if max_dd_date:
+            recovery_idx = (cum_returns.loc[max_dd_date:] >= running_max.loc[max_dd_date]).idxmax() if any(cum_returns.loc[max_dd_date:] >= running_max.loc[max_dd_date]) else None
+            recovery_date = recovery_idx if recovery_idx != max_dd_date else None
+        
+        # Value at Risk (parametric and historical)
+        var_95_hist = np.percentile(portfolio_returns, 5)
+        var_95_param = norm.ppf(0.05, mean_return, volatility)
+        
+        # Expected Shortfall/CVaR
+        cvar_95 = portfolio_returns[portfolio_returns <= var_95_hist].mean()
+        
+        # Sortino Ratio
+        downside_returns = portfolio_returns[portfolio_returns < daily_rf]
+        downside_volatility = downside_returns.std() * np.sqrt(252) if len(downside_returns) > 1 else 0
+        sortino_ratio = (annual_return - risk_free_rate) / downside_volatility if downside_volatility > 0 else 0
+        
+        # Calmar Ratio
+        calmar_ratio = annual_return / abs(max_drawdown) if max_drawdown < 0 else 0
+        
+        # Omega Ratio
+        threshold_return = daily_rf
+        gains = portfolio_returns[portfolio_returns > threshold_return].sum()
+        losses = abs(portfolio_returns[portfolio_returns <= threshold_return].sum())
+        omega_ratio = gains / losses if losses > 0 else np.inf
+        
+        # Information Ratio and Tracking Error
+        information_ratio = 0
+        tracking_error = 0
+        active_return = 0
+        benchmark_annual_return = 0
+        
+        if 'XU100.IS' in benchmark_returns.columns:
+            bench_returns = benchmark_returns['XU100.IS'].reindex(portfolio_returns.index).fillna(0)
+            if not bench_returns.empty:
+                benchmark_annual_return = bench_returns.mean() * 252
+                active_return = annual_return - benchmark_annual_return
+                active_returns = portfolio_returns - bench_returns
+                tracking_error = active_returns.std() * np.sqrt(252)
+                information_ratio = active_return / tracking_error if tracking_error > 0 else 0
+        
+        # Higher Moments
+        skewness = skew(portfolio_returns)
+        excess_kurtosis = kurtosis(portfolio_returns, fisher=False)  # Fisher=False gives Pearson's definition
+        
+        # Beta calculation
+        beta = 0
+        if 'XU100.IS' in benchmark_returns.columns:
+            bench_returns_aligned = benchmark_returns['XU100.IS'].reindex(portfolio_returns.index).dropna()
+            port_returns_aligned = portfolio_returns.reindex(bench_returns_aligned.index).dropna()
+            if len(port_returns_aligned) > 1:
+                covariance = np.cov(port_returns_aligned, bench_returns_aligned)[0, 1]
+                bench_variance = np.var(bench_returns_aligned)
+                beta = covariance / bench_variance if bench_variance > 0 else 0
+        
+        # Treynor Ratio
+        treynor_ratio = (annual_return - risk_free_rate) / beta if beta > 0 else 0
+        
+        # Appraisal Ratio (Jensen's Alpha divided by idiosyncratic risk)
+        alpha = annual_return - (risk_free_rate + beta * (benchmark_annual_return - risk_free_rate)) if beta > 0 else 0
+        idiosyncratic_risk = tracking_error  # Approximation
+        appraisal_ratio = alpha / idiosyncratic_risk if idiosyncratic_risk > 0 else 0
+        
+        # Gain/Loss Ratio (Bernardo-Ledoit)
+        positive_returns = portfolio_returns[portfolio_returns > 0]
+        negative_returns = portfolio_returns[portfolio_returns < 0]
+        gain_loss_ratio = abs(positive_returns.mean() / negative_returns.mean()) if len(negative_returns) > 0 and negative_returns.mean() < 0 else np.inf
+        
+        # Tail Ratio (95% VaR)
+        var_99 = np.percentile(portfolio_returns, 1)
+        tail_ratio = abs(var_99 / var_95_hist) if var_95_hist != 0 else 0
+        
+        # Recovery Time (in days)
+        recovery_days = None
+        if recovery_date and max_dd_date:
+            recovery_days = (recovery_date - max_dd_date).days
+        
+        metrics = {
+            # Return Metrics
+            'Annual Return': annual_return,
+            'Annual Volatility': annual_volatility,
+            'Cumulative Return': float(cum_returns.iloc[-1] - 1) if not cum_returns.empty else 0,
+            'Mean Daily Return': mean_return,
+            
+            # Risk-Adjusted Return Metrics
+            'Sharpe Ratio': sharpe_ratio,
+            'Sortino Ratio': sortino_ratio,
+            'Calmar Ratio': calmar_ratio,
+            'Omega Ratio': omega_ratio,
+            'Treynor Ratio': treynor_ratio,
+            
+            # Risk Metrics
+            'Max Drawdown': max_drawdown,
+            'Max DD Date': max_dd_date,
+            'Recovery Days': recovery_days,
+            'VaR (95% Historical)': var_95_hist,
+            'VaR (95% Parametric)': var_95_param,
+            'CVaR (95%)': cvar_95,
+            'Tail Ratio (99%/95%)': tail_ratio,
+            'Gain/Loss Ratio': gain_loss_ratio,
+            
+            # Relative Metrics
+            'Information Ratio': information_ratio,
+            'Tracking Error': tracking_error,
+            'Active Return': active_return,
+            'Beta': beta,
+            'Alpha': alpha,
+            'Appraisal Ratio': appraisal_ratio,
+            
+            # Statistical Metrics
+            'Skewness': skewness,
+            'Kurtosis': excess_kurtosis,
+            'Jarque-Bera Stat': stats.jarque_bera(portfolio_returns)[0] if len(portfolio_returns) > 0 else 0,
+            'Jarque-Bera p-value': stats.jarque_bera(portfolio_returns)[1] if len(portfolio_returns) > 0 else 1,
+            
+            # Additional
+            'Downside Volatility': downside_volatility,
+            'Upside Volatility': portfolio_returns[portfolio_returns > daily_rf].std() * np.sqrt(252) if len(portfolio_returns[portfolio_returns > daily_rf]) > 1 else 0,
+            'Win Rate': len(portfolio_returns[portfolio_returns > 0]) / len(portfolio_returns) if len(portfolio_returns) > 0 else 0,
+            'Avg Win / Avg Loss': abs(positive_returns.mean() / negative_returns.mean()) if len(negative_returns) > 0 and negative_returns.mean() < 0 else np.inf,
+        }
+        
+        return metrics, portfolio_returns, cum_returns, drawdown
+    
+    def optimize_portfolio(self, method, mu, S, returns, risk_free_rate, target_return=None, risk_aversion=1, constraints=None):
+        """Portfolio optimization with enhanced methods and constraints"""
+        
+        daily_rf = risk_free_rate / 252
+        
+        # Default constraints if none provided
+        if constraints is None:
+            constraints = {'min_weight': 0, 'max_weight': 1}
+        
+        try:
+            if method == 'max_sharpe':
+                ef = EfficientFrontier(mu, S)
+                ef.add_constraint(lambda w: w >= constraints.get('min_weight', 0))
+                ef.add_constraint(lambda w: w <= constraints.get('max_weight', 1))
+                ef.max_sharpe(risk_free_rate=daily_rf)
+                weights = ef.clean_weights()
+                
+            elif method == 'min_volatility':
+                ef = EfficientFrontier(mu, S)
+                ef.add_constraint(lambda w: w >= constraints.get('min_weight', 0))
+                ef.add_constraint(lambda w: w <= constraints.get('max_weight', 1))
+                ef.min_volatility()
+                weights = ef.clean_weights()
+                
+            elif method == 'efficient_risk':
+                ef = EfficientFrontier(mu, S)
+                target_vol = target_return if target_return is not None else mu.std().mean() * np.sqrt(252) * 0.8
+                ef.add_constraint(lambda w: w >= constraints.get('min_weight', 0))
+                ef.add_constraint(lambda w: w <= constraints.get('max_weight', 1))
+                ef.efficient_risk(target_volatility=target_vol/np.sqrt(252))
+                weights = ef.clean_weights()
+                
+            elif method == 'efficient_return':
+                ef = EfficientFrontier(mu, S)
+                target_ret = target_return if target_return is not None else mu.mean().mean() * 252 * 0.8
+                daily_target = target_ret / 252
+                ef.add_constraint(lambda w: w >= constraints.get('min_weight', 0))
+                ef.add_constraint(lambda w: w <= constraints.get('max_weight', 1))
+                ef.efficient_return(target_return=daily_target)
+                weights = ef.clean_weights()
+                
+            elif method == 'max_quadratic_utility':
+                ef = EfficientFrontier(mu, S)
+                ef.add_constraint(lambda w: w >= constraints.get('min_weight', 0))
+                ef.add_constraint(lambda w: w <= constraints.get('max_weight', 1))
+                ef.max_quadratic_utility(risk_aversion=risk_aversion)
+                weights = ef.clean_weights()
+                
+            elif method == 'hrp':
+                hrp = HRPOpt(returns)
+                weights = hrp.optimize()
+                weights = hrp.clean_weights()
+                
+            elif method == 'cvar':
+                cvar = EfficientCVaR(mu, returns)
+                cvar.add_constraint(lambda w: w >= constraints.get('min_weight', 0))
+                cvar.add_constraint(lambda w: w <= constraints.get('max_weight', 1))
+                cvar.min_cvar()
+                weights = cvar.clean_weights()
+                
+            elif method == 'equal_weight':
+                n_assets = len(returns.columns)
+                weights = {ticker: 1/n_assets for ticker in returns.columns}
+                
+            elif method == 'risk_parity':
+                # Risk Parity portfolio
+                n = len(returns.columns)
+                initial_weights = np.ones(n) / n
+                
+                def risk_parity_objective(w):
+                    portfolio_vol = np.sqrt(w @ S @ w.T)
+                    marginal_risk = (S @ w.T) / portfolio_vol
+                    risk_contributions = w * marginal_risk
+                    target_rc = portfolio_vol / n
+                    return np.sum((risk_contributions - target_rc) ** 2)
+                
+                bounds = [(constraints.get('min_weight', 0), constraints.get('max_weight', 1)) for _ in range(n)]
+                constraints_opt = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1}]
+                
+                result = minimize(risk_parity_objective, initial_weights, 
+                                bounds=bounds, constraints=constraints_opt)
+                weights = {ticker: result.x[i] for i, ticker in enumerate(returns.columns)}
+                
             else:
-                return None, 'No observations in response'
-        else:
-            error_msg = f"API Status {response.status_code}"
+                raise ValueError(f"Unknown optimization method: {method}")
+        
+        except Exception as e:
+            st.warning(f"Optimization failed for {method}: {str(e)}. Using Equal Weight as fallback.")
+            n_assets = len(returns.columns)
+            weights = {ticker: 1/n_assets for ticker in returns.columns}
+        
+        # Convert weights to DataFrame
+        weights_df = pd.DataFrame.from_dict(weights, orient='index', columns=['Weight'])
+        weights_df.index.name = 'Ticker'
+        weights_df = weights_df[weights_df['Weight'] > 0.001].sort_values('Weight', ascending=False)
+        
+        # Calculate performance for the optimized portfolio
+        weights_series = pd.Series(weights).reindex(returns.columns).fillna(0)
+        metrics, portfolio_returns, cum_returns, drawdown = self.calculate_enhanced_metrics(
+            weights_series, returns, None, risk_free_rate
+        )
+        
+        performance = (metrics['Annual Return'], metrics['Annual Volatility'], metrics['Sharpe Ratio'])
+        
+        return weights_df, performance, metrics
+
+    def plot_enhanced_efficient_frontier(self, mu, S, returns, method='max_sharpe'):
+        """Enhanced efficient frontier plot with multiple optimization points"""
+        
+        try:
+            cla = CLA(mu, S)
+            ef_points = cla.efficient_frontier(points=100)
+            
+            # Calculate individual assets
+            individual_returns = mu * 252  # Annualized
+            individual_vols = np.sqrt(np.diag(S) * 252)
+            
+            # Create subplots: EF, Risk Contributions, and Asset Cloud
+            fig = make_subplots(
+                rows=2, cols=2,
+                subplot_titles=('Efficient Frontier & Optimized Portfolios',
+                              'Risk Contribution Analysis',
+                              'Asset Risk-Return Characteristics',
+                              'Sharpe Ratio Across Frontier'),
+                specs=[[{"colspan": 2}, None], [{}, {}]],
+                vertical_spacing=0.12,
+                horizontal_spacing=0.15
+            )
+            
+            # 1. Efficient Frontier (main plot)
+            frontier_vols = [point[1] * np.sqrt(252) for point in ef_points]
+            frontier_rets = [point[0] * 252 for point in ef_points]
+            
+            # Calculate Sharpe Ratios along frontier
+            frontier_sharpe = [(ret - self.risk_free_rate) / vol if vol > 0 else 0 
+                             for ret, vol in zip(frontier_rets, frontier_vols)]
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=frontier_vols,
+                    y=frontier_rets,
+                    mode='lines',
+                    name='Efficient Frontier',
+                    line=dict(color='#3B82F6', width=3),
+                    fill='tozeroy',
+                    fillcolor='rgba(59, 130, 246, 0.1)',
+                    hovertemplate="Risk: %{x:.2%}<br>Return: %{y:.2%}<br>Sharpe: %{customdata:.3f}",
+                    customdata=frontier_sharpe
+                ),
+                row=1, col=1
+            )
+            
+            # Optimization strategies to plot
+            strategies = [
+                ('Max Sharpe', 'max_sharpe'),
+                ('Min Volatility', 'min_volatility'),
+                ('Equal Weight', 'equal_weight'),
+                ('Risk Parity', 'risk_parity')
+            ]
+            
+            colors = ['#10B981', '#EF4444', '#F59E0B', '#8B5CF6']
+            
+            for i, (label, method_name) in enumerate(strategies):
+                try:
+                    weights_df, performance, metrics = self.optimize_portfolio(
+                        method_name, mu, S, returns, self.risk_free_rate
+                    )
+                    ret, vol, sharpe = performance
+                    
+                    fig.add_trace(
+                        go.Scatter(
+                            x=[vol],
+                            y=[ret],
+                            mode='markers+text',
+                            name=label,
+                            marker=dict(
+                                size=15,
+                                color=colors[i],
+                                line=dict(width=2, color='white')
+                            ),
+                            text=[label],
+                            textposition="top center",
+                            hovertemplate=(
+                                f"<b>{label}</b><br>"
+                                f"Return: {ret:.2%}<br>"
+                                f"Volatility: {vol:.2%}<br>"
+                                f"Sharpe: {sharpe:.3f}<br>"
+                                f"Max DD: {metrics.get('Max Drawdown', 0):.2%}"
+                            )
+                        ),
+                        row=1, col=1
+                    )
+                except:
+                    continue
+            
+            # Individual stocks
+            fig.add_trace(
+                go.Scatter(
+                    x=individual_vols,
+                    y=individual_returns,
+                    mode='markers',
+                    name='Individual Assets',
+                    marker=dict(
+                        size=8,
+                        color='#6B7280',
+                        opacity=0.7,
+                        line=dict(width=1, color='white')
+                    ),
+                    text=returns.columns,
+                    hovertemplate="<b>%{text}</b><br>Return: %{y:.2%}<br>Volatility: %{x:.2%}"
+                ),
+                row=1, col=1
+            )
+            
+            # 2. Risk Contribution Analysis (top right)
             try:
-                error_detail = response.json()
-                error_msg += f" - {error_detail.get('error_message', 'No details')}"
+                # Get Max Sharpe portfolio for risk decomposition
+                weights_df, _, _ = self.optimize_portfolio('max_sharpe', mu, S, returns, self.risk_free_rate)
+                weights = weights_df['Weight'].values
+                
+                # Calculate risk contributions
+                portfolio_vol = np.sqrt(weights @ S @ weights.T)
+                marginal_risk = (S @ weights.T) / portfolio_vol
+                risk_contributions = weights * marginal_risk
+                perc_contributions = risk_contributions / portfolio_vol
+                
+                # Top 10 contributors
+                top_indices = np.argsort(perc_contributions)[-10:][::-1]
+                top_tickers = returns.columns[top_indices]
+                top_contributions = perc_contributions[top_indices]
+                
+                fig.add_trace(
+                    go.Bar(
+                        x=top_contributions,
+                        y=top_tickers,
+                        orientation='h',
+                        name='Risk Contribution',
+                        marker_color='#F59E0B',
+                        hovertemplate="%{y}: %{x:.1%} of total risk"
+                    ),
+                row=1, col=2  # Note: This will be moved after fixing colspan
+                )
             except:
                 pass
-            return None, error_msg
             
-    except requests.exceptions.Timeout:
-        return None, "Request timeout"
-    except requests.exceptions.ConnectionError:
-        return None, "Connection error"
-    except Exception as e:
-        return None, f"Error: {str(e)}"
+            # 3. Asset Risk-Return (bottom left)
+            # Add convex hull of assets
+            from scipy.spatial import ConvexHull
+            points = np.column_stack([individual_vols, individual_returns])
+            if len(points) > 3:
+                try:
+                    hull = ConvexHull(points)
+                    hull_vols = points[hull.vertices, 0]
+                    hull_rets = points[hull.vertices, 1]
+                    
+                    fig.add_trace(
+                        go.Scatter(
+                            x=hull_vols,
+                            y=hull_rets,
+                            mode='lines',
+                            fill='toself',
+                            fillcolor='rgba(168, 85, 247, 0.1)',
+                            line=dict(color='#A855F7', dash='dash'),
+                            name='Asset Convex Hull'
+                        ),
+                        row=2, col=1
+                    )
+                except:
+                    pass
+            
+            # 4. Sharpe Ratio across frontier (bottom right)
+            fig.add_trace(
+                go.Scatter(
+                    x=frontier_vols,
+                    y=frontier_sharpe,
+                    mode='lines',
+                    name='Sharpe Ratio',
+                    line=dict(color='#10B981', width=2),
+                    fill='tozeroy',
+                    fillcolor='rgba(16, 185, 129, 0.1)'
+                ),
+                row=2, col=2
+            )
+            
+            # Find max Sharpe point
+            max_sharpe_idx = np.argmax(frontier_sharpe)
+            fig.add_trace(
+                go.Scatter(
+                    x=[frontier_vols[max_sharpe_idx]],
+                    y=[frontier_sharpe[max_sharpe_idx]],
+                    mode='markers',
+                    name='Max Sharpe',
+                    marker=dict(size=12, color='#10B981', line=dict(width=2, color='white')),
+                    hovertemplate="Max Sharpe: %{y:.3f}<br>at Vol: %{x:.2%}"
+                ),
+                row=2, col=2
+            )
+            
+            # Update layout
+            fig.update_layout(
+                height=900,
+                showlegend=True,
+                template='plotly_white',
+                plot_bgcolor='white',
+                paper_bgcolor='white',
+                legend=dict(
+                    yanchor="top",
+                    y=0.99,
+                    xanchor="left",
+                    x=1.05,
+                    bgcolor='rgba(255, 255, 255, 0.8)',
+                    bordercolor='gray',
+                    borderwidth=1
+                )
+            )
+            
+            # Update axes
+            fig.update_xaxes(title_text="Annual Volatility", row=1, col=1)
+            fig.update_yaxes(title_text="Annual Return", row=1, col=1)
+            fig.update_xaxes(title_text="Risk Contribution", row=1, col=2)
+            fig.update_yaxes(title_text="Asset", row=1, col=2)
+            fig.update_xaxes(title_text="Annual Volatility", row=2, col=1)
+            fig.update_yaxes(title_text="Annual Return", row=2, col=1)
+            fig.update_xaxes(title_text="Annual Volatility", row=2, col=2)
+            fig.update_yaxes(title_text="Sharpe Ratio", row=2, col=2)
+            
+            return fig
+            
+        except Exception as e:
+            st.error(f"Error plotting efficient frontier: {str(e)}")
+            return None
 
-def generate_realistic_fallback_data(series_id, start_date, end_date, frequency):
-    """Generate realistic fallback data based on actual FRED scale"""
-    if frequency == 'monthly':
-        dates = pd.date_range(start=start_date, end=end_date, freq='MS')
-        periods_per_year = 12
-    elif frequency == 'quarterly':
-        dates = pd.date_range(start=start_date, end=end_date, freq='Q')
-        periods_per_year = 4
-    else:
-        dates = pd.date_range(start=start_date, end=end_date, freq='W-FRI')
-        periods_per_year = 52
-    
-    n = len(dates)
-    np.random.seed(hash(series_id) % 10000)
-    
-    # REALISTIC SCALES based on actual FRED data (in millions)
-    if 'TOTALSL' in series_id:  # Total Mutual Fund Assets
-        # Actual scale: ~$20 trillion = 20,000,000 million
-        base_value = 20000000.0
-        monthly_growth = 30000.0
-        volatility = 2000000.0
+    def create_risk_report_dashboard(self, metrics, portfolio_returns, benchmark_returns):
+        """Create comprehensive risk report dashboard"""
         
-    elif 'MMMFF' in series_id:  # Money Market Funds
-        # Actual scale: ~$5 trillion = 5,000,000 million
-        base_value = 5000000.0
-        monthly_growth = 10000.0
-        volatility = 800000.0
+        # Create subplots for risk dashboard
+        fig = make_subplots(
+            rows=3, cols=3,
+            subplot_titles=(
+                'Cumulative Returns vs Benchmark',
+                'Rolling Sharpe Ratio (6M Window)',
+                'Drawdown Analysis',
+                'Return Distribution',
+                'QQ Plot (vs Normal)',
+                'Rolling Volatility (1M Window)',
+                'Autocorrelation of Returns',
+                'Autocorrelation of Squared Returns',
+                'VaR Breaches Timeline'
+            ),
+            specs=[
+                [{"type": "scatter"}, {"type": "scatter"}, {"type": "scatter"}],
+                [{"type": "histogram"}, {"type": "scatter"}, {"type": "scatter"}],
+                [{"type": "scatter"}, {"type": "scatter"}, {"type": "scatter"}]
+            ],
+            vertical_spacing=0.08,
+            horizontal_spacing=0.1
+        )
         
-    elif 'EQTA' in series_id:  # Equity Fund Assets
-        # Actual scale: ~$15 trillion = 15,000,000 million
-        base_value = 15000000.0
-        monthly_growth = 25000.0
-        volatility = 3000000.0
+        # 1. Cumulative Returns
+        portfolio_cum = np.exp(portfolio_returns.cumsum())
+        if 'XU100.IS' in benchmark_returns.columns:
+            bench_cum = np.exp(benchmark_returns['XU100.IS'].reindex(portfolio_returns.index).fillna(0).cumsum())
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=portfolio_cum.index,
+                    y=portfolio_cum.values,
+                    name='Portfolio',
+                    line=dict(color='#3B82F6', width=2)
+                ),
+                row=1, col=1
+            )
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=bench_cum.index,
+                    y=bench_cum.values,
+                    name='XU100',
+                    line=dict(color='#6B7280', width=2)
+                ),
+                row=1, col=1
+            )
         
-    elif 'NCBD' in series_id:  # Bond Fund Assets
-        # Actual scale: ~$8 trillion = 8,000,000 million
-        base_value = 8000000.0
-        monthly_growth = 15000.0
-        volatility = 1200000.0
+        # 2. Rolling Sharpe Ratio
+        rolling_window = 126  # 6 months
+        if len(portfolio_returns) > rolling_window:
+            rolling_sharpe = portfolio_returns.rolling(rolling_window).apply(
+                lambda x: (x.mean() * 252 - self.risk_free_rate) / (x.std() * np.sqrt(252)) if x.std() > 0 else 0
+            )
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=rolling_sharpe.index,
+                    y=rolling_sharpe.values,
+                    name='Rolling Sharpe',
+                    line=dict(color='#10B981', width=2),
+                    fill='tozeroy',
+                    fillcolor='rgba(16, 185, 129, 0.1)'
+                ),
+                row=1, col=2
+            )
         
-    elif 'NCBC' in series_id:  # Corporate Bonds
-        # Actual scale: ~$10 trillion = 10,000,000 million
-        base_value = 10000000.0
-        monthly_growth = 20000.0
-        volatility = 1500000.0
+        # 3. Drawdown Analysis
+        fig.add_trace(
+            go.Scatter(
+                x=metrics.get('drawdown_series', pd.Series()).index,
+                y=metrics.get('drawdown_series', pd.Series()).values * 100,
+                name='Drawdown',
+                line=dict(color='#EF4444', width=2),
+                fill='tozeroy',
+                fillcolor='rgba(239, 68, 68, 0.1)'
+            ),
+            row=1, col=3
+        )
         
-    elif 'TCMA' in series_id:  # Treasury Securities
-        # Actual scale: ~$25 trillion = 25,000,000 million
-        base_value = 25000000.0
-        monthly_growth = 40000.0
-        volatility = 4000000.0
+        # 4. Return Distribution
+        fig.add_trace(
+            go.Histogram(
+                x=portfolio_returns * 100,
+                nbinsx=50,
+                name='Returns',
+                marker_color='#3B82F6',
+                opacity=0.7
+            ),
+            row=2, col=1
+        )
         
-    elif 'NCBEMF' in series_id:  # Mutual Fund Shares
-        # Actual scale: ~$12 trillion = 12,000,000 million
-        base_value = 12000000.0
-        monthly_growth = 18000.0
-        volatility = 2000000.0
+        # Add normal distribution overlay
+        x_norm = np.linspace(portfolio_returns.min() * 100, portfolio_returns.max() * 100, 100)
+        y_norm = stats.norm.pdf(x_norm, portfolio_returns.mean() * 100, portfolio_returns.std() * 100)
         
-    elif 'TCMIL' in series_id:  # Total Debt Securities
-        # Actual scale: ~$50 trillion = 50,000,000 million
-        base_value = 50000000.0
-        monthly_growth = 60000.0
-        volatility = 6000000.0
+        fig.add_trace(
+            go.Scatter(
+                x=x_norm,
+                y=y_norm,
+                name='Normal Dist',
+                line=dict(color='#EF4444', dash='dash')
+            ),
+            row=2, col=1
+        )
         
-    else:
-        base_value = 10000000.0
-        monthly_growth = 15000.0
-        volatility = 1500000.0
-    
-    # Adjust growth based on frequency
-    if frequency == 'quarterly':
-        monthly_growth = monthly_growth * 3
-    
-    # Generate time index
-    time_index = np.arange(n, dtype=np.float64)
-    
-    # Trend component
-    trend = base_value + monthly_growth * time_index
-    
-    # Seasonal component
-    seasonal = volatility * 0.1 * np.sin(2 * np.pi * time_index / periods_per_year)
-    
-    # Random component
-    random_component = np.random.normal(0, volatility * 0.15, n)
-    
-    # Combine components
-    values = trend + seasonal + random_component
-    values = np.abs(values)  # Ensure positive
-    
-    df = pd.DataFrame({'Value': values}, index=dates)
-    return df
+        # 5. QQ Plot
+        if len(portfolio_returns) > 10:
+            import statsmodels.api as sm
+            qq_data = sm.qqplot(portfolio_returns, stats.norm, fit=True, line='45')
+            qq_theory = qq_data.theory_quantiles
+            qq_sample = qq_data.sample_quantiles
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=qq_theory,
+                    y=qq_sample,
+                    mode='markers',
+                    name='QQ Points',
+                    marker=dict(size=4, color='#3B82F6')
+                ),
+                row=2, col=2
+            )
+            
+            # Add 45-degree line
+            line_range = [min(qq_theory.min(), qq_sample.min()), 
+                         max(qq_theory.max(), qq_sample.max())]
+            fig.add_trace(
+                go.Scatter(
+                    x=line_range,
+                    y=line_range,
+                    mode='lines',
+                    name='45° Line',
+                    line=dict(color='#EF4444', dash='dash')
+                ),
+                row=2, col=2
+            )
+        
+        # 6. Rolling Volatility
+        rolling_vol = portfolio_returns.rolling(21).std() * np.sqrt(252) * 100
+        
+        fig.add_trace(
+            go.Scatter(
+                x=rolling_vol.index,
+                y=rolling_vol.values,
+                name='Volatility',
+                line=dict(color='#F59E0B', width=2)
+            ),
+            row=2, col=3
+        )
+        
+        # 7. Autocorrelation of Returns
+        max_lag = min(40, len(portfolio_returns) // 2)
+        if max_lag > 5:
+            acf = [portfolio_returns.autocorr(lag=i) for i in range(1, max_lag + 1)]
+            
+            fig.add_trace(
+                go.Bar(
+                    x=list(range(1, max_lag + 1)),
+                    y=acf,
+                    name='ACF Returns',
+                    marker_color='#8B5CF6'
+                ),
+                row=3, col=1
+            )
+        
+        # 8. Autocorrelation of Squared Returns (volatility clustering)
+        if max_lag > 5:
+            acf_sq = [(portfolio_returns**2).autocorr(lag=i) for i in range(1, max_lag + 1)]
+            
+            fig.add_trace(
+                go.Bar(
+                    x=list(range(1, max_lag + 1)),
+                    y=acf_sq,
+                    name='ACF Squared Returns',
+                    marker_color='#EC4899'
+                ),
+                row=3, col=2
+            )
+        
+        # 9. VaR Breaches
+        var_level = 0.95
+        var_threshold = np.percentile(portfolio_returns, (1 - var_level) * 100)
+        breaches = portfolio_returns < var_threshold
+        
+        fig.add_trace(
+            go.Scatter(
+                x=portfolio_returns.index,
+                y=portfolio_returns.values * 100,
+                mode='markers',
+                name='Returns',
+                marker=dict(
+                    size=6,
+                    color=['#EF4444' if b else '#3B82F6' for b in breaches],
+                    opacity=0.7
+                )
+            ),
+            row=3, col=3
+        )
+        
+        # Add VaR line
+        fig.add_trace(
+            go.Scatter(
+                x=[portfolio_returns.index[0], portfolio_returns.index[-1]],
+                y=[var_threshold * 100, var_threshold * 100],
+                mode='lines',
+                name=f'VaR ({var_level*100:.0f}%)',
+                line=dict(color='#EF4444', dash='dash')
+            ),
+            row=3, col=3
+        )
+        
+        # Update layout
+        fig.update_layout(
+            height=1200,
+            showlegend=True,
+            template='plotly_white',
+            plot_bgcolor='white',
+            paper_bgcolor='white'
+        )
+        
+        # Update axes titles
+        fig.update_yaxes(title_text="Cumulative Return", row=1, col=1)
+        fig.update_yaxes(title_text="Sharpe Ratio", row=1, col=2)
+        fig.update_yaxes(title_text="Drawdown (%)", row=1, col=3)
+        fig.update_yaxes(title_text="Frequency", row=2, col=1)
+        fig.update_yaxes(title_text="Sample Quantiles", row=2, col=2)
+        fig.update_yaxes(title_text="Volatility (%)", row=2, col=3)
+        fig.update_yaxes(title_text="Autocorrelation", row=3, col=1)
+        fig.update_yaxes(title_text="Autocorrelation", row=3, col=2)
+        fig.update_yaxes(title_text="Return (%)", row=3, col=3)
+        
+        return fig
 
-def get_latest_date_info(data_dict):
-    """Get the latest available date across all data"""
-    latest_dates = []
-    for category, data in data_dict.items():
-        if 'assets' in data and not data['assets'].empty:
-            latest_dates.append(data['assets'].index[-1])
-    
-    if latest_dates:
-        latest_overall = max(latest_dates)
-        return latest_overall.strftime('%B %d, %Y')
-    return "Not available"
+# ============================================================================
+# 3. ENHANCED GARCH AND RISK FUNCTIONS
+# ============================================================================
 
-@st.cache_data(ttl=3600)
-def load_fund_data(selected_categories, start_date, frequency):
-    """Load fund data from FRED API with enhanced error handling"""
-    end_date = datetime.today().strftime('%Y-%m-%d')
+def calculate_enhanced_garch(returns_series, p=1, q=1):
+    """Fit GARCH(p,q) model with enhanced diagnostics"""
+    if not HAS_ARCH or len(returns_series) < 100:
+        return None, None, None
     
-    data_dict = {}
-    api_status = {}
-    
-    for category in selected_categories:
-        if category in FRED_SERIES:
-            series_info = FRED_SERIES[category]
-            series_id = series_info['fred_id']
-            
-            # Check frequency compatibility
-            available_freqs = series_info.get('available_frequencies', ['monthly'])
-            if frequency not in available_freqs:
-                use_freq = available_freqs[0]
-            else:
-                use_freq = frequency
-            
-            # Fetch data from FRED API
-            df, data_source = fetch_fred_data(series_id, start_date, end_date, use_freq)
-            
-            api_status[category] = {
-                'series_id': series_id,
-                'status': 'FRED' if df is not None and not df.empty else 'Failed',
-                'message': data_source,
-                'data_points': len(df) if df is not None else 0
+    try:
+        # Scale returns for numerical stability
+        returns_scaled = returns_series * 100
+        
+        # Fit GARCH model
+        model = arch_model(returns_scaled.dropna(), vol='Garch', p=p, q=q, dist='skewt')
+        res = model.fit(disp='off', show_warning=False)
+        
+        # Conditional volatility (unscaled)
+        conditional_volatility = res.conditional_volatility / 100
+        
+        # Extract parameters with confidence intervals
+        params = res.params
+        std_err = res.std_err
+        tvalues = res.tvalues
+        pvalues = res.pvalues
+        
+        # Calculate persistence and half-life
+        persistence = sum([params.get(f'alpha[{i}]', 0) for i in range(1, p+1)]) + \
+                     sum([params.get(f'beta[{i}]', 0) for i in range(1, q+1)])
+        
+        half_life = np.log(0.5) / np.log(persistence) if persistence < 1 else np.inf
+        
+        # Forecast next periods
+        forecast_horizons = [1, 5, 20]  # 1 day, 1 week, 1 month
+        forecasts = {}
+        
+        for horizon in forecast_horizons:
+            forecast_var = res.forecast(horizon=horizon)
+            forecasts[horizon] = {
+                'variance': float(forecast_var.variance.iloc[-1, -1]) / 10000,  # Unscale
+                'volatility': np.sqrt(float(forecast_var.variance.iloc[-1, -1])) / 100,
+                'annualized_vol': np.sqrt(float(forecast_var.variance.iloc[-1, -1]) * 252) / 100
             }
+        
+        # Model diagnostics
+        residuals = res.resid / res.conditional_volatility  # Standardized residuals
+        
+        garch_params = {
+            'Log Likelihood': res.loglikelihood,
+            'AIC': res.aic,
+            'BIC': res.bic,
+            'Persistence': persistence,
+            'Half-Life (days)': half_life,
+            'Long Run Variance': params.get('omega', 0) / (1 - persistence) if persistence < 1 else np.inf,
+            'Skewness Parameter': params.get('lambda', None),  # For skewed t-distribution
+            'Degrees of Freedom': params.get('nu', None),  # For t-distribution
+        }
+        
+        # Add forecast information
+        for horizon, forecast in forecasts.items():
+            garch_params[f'{horizon}-Day Forecast Vol'] = forecast['volatility']
+            garch_params[f'{horizon}-Day Annualized Vol'] = forecast['annualized_vol']
+        
+        # Parameter statistics
+        garch_stats = {}
+        for param in params.index:
+            garch_stats[param] = {
+                'Estimate': params[param],
+                'Std. Error': std_err.get(param, 0),
+                't-Statistic': tvalues.get(param, 0),
+                'p-Value': pvalues.get(param, 1)
+            }
+        
+        return garch_params, conditional_volatility, garch_stats, residuals
+        
+    except Exception as e:
+        st.warning(f"GARCH model fitting failed: {str(e)}")
+        return None, None, None, None
+
+def calculate_copula_var(portfolio_returns, benchmark_returns, confidence_levels=[0.95, 0.99]):
+    """Calculate VaR using copula methods for dependency modeling"""
+    
+    var_results = {}
+    
+    for confidence in confidence_levels:
+        # Historical VaR
+        hist_var = np.percentile(portfolio_returns, (1 - confidence) * 100)
+        
+        # Gaussian VaR (parametric)
+        gaussian_var = norm.ppf(1 - confidence, portfolio_returns.mean(), portfolio_returns.std())
+        
+        # Student-t VaR (fat tails)
+        df, loc, scale = stats.t.fit(portfolio_returns)
+        t_var = stats.t.ppf(1 - confidence, df, loc, scale)
+        
+        # Cornish-Fisher VaR (adjusts for skewness and kurtosis)
+        z = norm.ppf(1 - confidence)
+        s = skew(portfolio_returns)
+        k = kurtosis(portfolio_returns)
+        cf_z = z + (z**2 - 1) * s/6 + (z**3 - 3*z) * k/24 - (2*z**3 - 5*z) * s**2/36
+        cf_var = portfolio_returns.mean() + cf_z * portfolio_returns.std()
+        
+        var_results[confidence] = {
+            'Historical': hist_var,
+            'Gaussian': gaussian_var,
+            'Student-t': t_var,
+            'Cornish-Fisher': cf_var,
+            'Expected Shortfall': portfolio_returns[portfolio_returns <= hist_var].mean()
+        }
+    
+    return var_results
+
+def perform_stress_test(portfolio_returns, scenarios):
+    """Perform stress testing under various market scenarios"""
+    
+    results = {}
+    
+    # Historical stress periods (example)
+    stress_periods = {
+        'COVID-19 Crash': ('2020-02-20', '2020-03-23'),
+        'Inflation Spike': ('2022-01-01', '2022-12-31'),
+        'Recent Volatility': (datetime.now() - timedelta(days=90), datetime.now())
+    }
+    
+    for scenario, (start, end) in stress_periods.items():
+        if start in portfolio_returns.index and end in portfolio_returns.index:
+            mask = (portfolio_returns.index >= start) & (portfolio_returns.index <= end)
+            stress_returns = portfolio_returns[mask]
             
-            if df is None or df.empty:
-                # Try alternative frequency
-                for alt_freq in available_freqs:
-                    if alt_freq != use_freq:
-                        df, data_source = fetch_fred_data(series_id, start_date, end_date, alt_freq)
-                        if df is not None and not df.empty:
-                            api_status[category]['status'] = 'FRED'
-                            api_status[category]['message'] = f'Using {alt_freq} data'
-                            api_status[category]['data_points'] = len(df)
-                            break
-                
-                if df is None or df.empty:
-                    # Generate realistic fallback data
-                    st.warning(f"⚠️ Using realistic fallback data for {category} ({series_id})")
-                    df = generate_realistic_fallback_data(series_id, start_date, end_date, use_freq)
-                    data_source_type = 'Fallback'
-                else:
-                    data_source_type = 'FRED (Alternative Freq)'
-            else:
-                data_source_type = 'FRED'
-            
-            if df is not None and not df.empty:
-                # Ensure data is numeric and in correct scale
-                df['Value'] = pd.to_numeric(df['Value'], errors='coerce')
-                df = df.dropna()
-                
-                # Check if data needs scaling (some FRED series are in billions)
-                if df['Value'].max() < 1000:  # If max value < 1000, might be in billions
-                    df['Value'] = df['Value'] * 1000  # Convert billions to millions
-                
-                if len(df) < 2:
-                    # Try to get more historical data
-                    older_start = (datetime.strptime(start_date, '%Y-%m-%d') - timedelta(days=365*10)).strftime('%Y-%m-%d')
-                    df_older, _ = fetch_fred_data(series_id, older_start, end_date, use_freq)
-                    if df_older is not None and not df_older.empty:
-                        df = df_older
-                
-                # Calculate flows (first difference)
-                df_flows = df.diff()
-                df_flows.columns = ['Flow']
-                
-                # Calculate percentage changes
-                df_pct = df.pct_change() * 100
-                df_pct.columns = ['Pct_Change']
-                
-                # Calculate returns
-                if not df.empty and len(df) > 1:
-                    df_returns = np.log(df/df.shift(1)) * 100
-                    df_returns.columns = ['Log_Return']
-                else:
-                    df_returns = pd.DataFrame(columns=['Log_Return'])
-                
-                data_dict[category] = {
-                    'assets': df,
-                    'flows': df_flows,
-                    'pct_change': df_pct,
-                    'log_returns': df_returns,
-                    'description': series_info['description'],
-                    'fred_id': series_info['fred_id'],
-                    'category': series_info['category'],
-                    'unit': series_info['unit'],
-                    'source': series_info['source'],
-                    'color': series_info['color'],
-                    'frequency': use_freq,
-                    'periods_for_trend': 12 if use_freq == 'monthly' else (4 if use_freq == 'quarterly' else 24),
-                    'data_source': data_source_type,
-                    'api_status': api_status[category]
+            if len(stress_returns) > 0:
+                results[scenario] = {
+                    'Start': start,
+                    'End': end,
+                    'Days': len(stress_returns),
+                    'Total Return': np.exp(stress_returns.sum()) - 1,
+                    'Worst Day': stress_returns.min(),
+                    'Best Day': stress_returns.max(),
+                    'Volatility': stress_returns.std() * np.sqrt(252),
+                    'Max Drawdown': calculate_max_drawdown(stress_returns)
                 }
     
-    return data_dict, api_status
+    # Add hypothetical scenarios
+    hypothetical = {
+        '10% Market Drop': -0.10,
+        '5% Market Drop': -0.05,
+        'High Volatility (50% annual)': 0.50 / np.sqrt(252),
+        'Interest Rate Shock (+5%)': -0.15  # Estimated impact
+    }
+    
+    for scenario, impact in hypothetical.items():
+        results[scenario] = {
+            'Hypothetical Impact': impact,
+            'Portfolio Impact': impact * 0.7  # Assuming 0.7 beta
+        }
+    
+    return results
 
-def calculate_comprehensive_statistics(data_dict):
-    """Calculate comprehensive statistics for all series"""
-    for category, data in data_dict.items():
-        if 'assets' in data and not data['assets'].empty:
-            assets = data['assets']['Value']
-            returns = data['log_returns']['Log_Return'].dropna() if 'log_returns' in data else pd.Series(dtype=float)
-            
-            if len(assets) > 0:
-                stats_dict = {}
-                
-                # Basic statistics
-                stats_dict['mean'] = float(assets.mean())
-                stats_dict['median'] = float(assets.median())
-                stats_dict['std'] = float(assets.std())
-                stats_dict['min'] = float(assets.min())
-                stats_dict['max'] = float(assets.max())
-                stats_dict['skewness'] = float(assets.skew())
-                stats_dict['kurtosis'] = float(assets.kurtosis())
-                stats_dict['cv'] = float(stats_dict['std'] / stats_dict['mean'] if stats_dict['mean'] != 0 else 0)
-                
-                # Calculate growth metrics
-                if len(assets) > 1:
-                    total_growth = float((assets.iloc[-1] / assets.iloc[0] - 1) * 100)
-                    
-                    # Calculate annual growth based on frequency
-                    if data.get('frequency') == 'monthly':
-                        periods_per_year = 12
-                    elif data.get('frequency') == 'quarterly':
-                        periods_per_year = 4
-                    else:
-                        periods_per_year = 52
-                    
-                    annual_growth = float(((assets.iloc[-1] / assets.iloc[0]) ** (periods_per_year/len(assets)) - 1) * 100)
-                    stats_dict['total_growth'] = total_growth
-                    stats_dict['annual_growth'] = annual_growth
-                
-                # Return statistics
-                if len(returns) > 0:
-                    stats_dict['return_mean'] = float(returns.mean())
-                    stats_dict['return_std'] = float(returns.std())
-                    
-                    # Calculate Sharpe ratio based on frequency
-                    if data.get('frequency') == 'monthly':
-                        annual_factor = np.sqrt(12)
-                    elif data.get('frequency') == 'quarterly':
-                        annual_factor = np.sqrt(4)
-                    else:
-                        annual_factor = np.sqrt(52)
-                    
-                    stats_dict['sharpe_ratio'] = float((returns.mean() / returns.std() * annual_factor) if returns.std() > 0 else 0)
-                    stats_dict['max_drawdown'] = float(calculate_max_drawdown(assets))
-                    
-                    # Stationarity tests
-                    try:
-                        if len(returns.dropna()) > 10:
-                            adf_result = adfuller(returns.dropna())
-                            stats_dict['adf_statistic'] = float(adf_result[0])
-                            stats_dict['adf_pvalue'] = float(adf_result[1])
-                        else:
-                            stats_dict['adf_statistic'] = None
-                            stats_dict['adf_pvalue'] = None
-                    except:
-                        stats_dict['adf_statistic'] = None
-                        stats_dict['adf_pvalue'] = None
-                
-                # Trend statistics
-                if len(assets) > 12:
-                    # Linear trend
-                    x = np.arange(len(assets), dtype=np.float64)
-                    y = assets.values.astype(np.float64)
-                    slope, intercept = np.polyfit(x, y, 1)
-                    stats_dict['trend_slope'] = float(slope)
-                    stats_dict['trend_intercept'] = float(intercept)
-                    stats_dict['trend_r2'] = float(np.corrcoef(x, y)[0, 1]**2)
-                
-                data['statistics'] = stats_dict
-    
-    return data_dict
+def calculate_max_drawdown(returns_series):
+    """Calculate maximum drawdown from return series"""
+    cum_returns = np.exp(returns_series.cumsum())
+    running_max = cum_returns.cummax()
+    drawdown = (cum_returns - running_max) / running_max
+    return drawdown.min()
 
-def calculate_max_drawdown(assets):
-    """Calculate maximum drawdown"""
-    if len(assets) < 2:
-        return 0.0
-    
-    cumulative = (1 + assets.pct_change()).cumprod()
-    running_max = cumulative.expanding().max()
-    drawdown = (cumulative - running_max) / running_max
-    min_drawdown = drawdown.min()
-    return float(min_drawdown * 100 if not pd.isna(min_drawdown) else 0.0)
+# ============================================================================
+# 4. ENHANCED STREAMLIT APPLICATION WITH TAB LAYOUT
+# ============================================================================
 
-def create_executive_summary(data_dict, frequency):
-    """Create executive summary with latest date"""
-    latest_date = get_latest_date_info(data_dict)
+def main_streamlit_app():
+    st.markdown('<div class="main-header">🇹🇷 BIST Portfolio Risk & Optimization Terminal | Institutional Platform</div>', unsafe_allow_html=True)
+    st.markdown("*Advanced Portfolio Analytics for Turkish Equity Markets*")
     
-    st.markdown(f"""
-    <div class="section-header">
-        <span>Executive Summary</span>
-        <span class="date-indicator">Latest Data: {latest_date}</span>
-    </div>
-    """, unsafe_allow_html=True)
+    # Initialize optimizer
+    optimizer = TurkishPortfolioOptimizer()
     
-    if not data_dict:
-        st.warning("No data available")
-        return
-    
-    # Create metrics row
-    cols = st.columns(min(4, len(data_dict)))
-    
-    for idx, (category, data) in enumerate(list(data_dict.items())[:4]):
-        with cols[idx % len(cols)]:
-            if 'assets' in data and not data['assets'].empty:
-                latest_assets = data['assets'].iloc[-1, 0]
-                latest_flow = data['flows'].iloc[-1, 0] if 'flows' in data and not data['flows'].empty else 0
-                
-                # Format asset value appropriately
-                if latest_assets >= 1000000:  # Trillions
-                    asset_display = f"${latest_assets/1000000:,.1f}T"
-                elif latest_assets >= 1000:  # Billions
-                    asset_display = f"${latest_assets/1000:,.1f}B"
-                else:  # Millions
-                    asset_display = f"${latest_assets:,.0f}M"
-                
-                # Format flow value
-                if abs(latest_flow) >= 1000:  # Billions
-                    flow_display = f"${latest_flow/1000:,.1f}B"
-                else:  # Millions
-                    flow_display = f"${latest_flow:,.0f}M"
-                
-                # Data source badge
-                data_source = data.get('data_source', 'Unknown')
-                badge_class = "badge-fred" if 'FRED' in data_source else "badge-sample"
-                badge_text = "FRED" if 'FRED' in data_source else "Fallback"
-                
-                st.markdown(f"""
-                <div class='metric-card'>
-                    <div class='metric-label'>
-                        {category} 
-                        <span class='data-source-badge {badge_class}'>{badge_text}</span>
-                    </div>
-                    <div class='metric-value'>{asset_display}</div>
-                    <div>
-                        <span style='color: {'#27ae60' if latest_flow > 0 else '#e74c3c'};'>
-                            {'+' if latest_flow > 0 else ''}{flow_display}
-                        </span>
-                        <div style='font-size: 0.8rem; color: #666666; margin-top: 8px;'>
-                            Monthly Flow
-                        </div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-
-def create_professional_growth_charts(data_dict):
-    """Create professional growth analysis with latest date"""
-    latest_date = get_latest_date_info(data_dict)
-    
-    st.markdown(f"""
-    <div class="section-header">
-        <span>Growth Dynamics Analysis</span>
-        <span class="date-indicator">Latest Data: {latest_date}</span>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    if not data_dict:
-        st.warning("No data available")
-        return
-    
-    # Analysis controls
-    col1, col2 = st.columns(2)
-    with col1:
-        analysis_type = st.selectbox(
-            "Analysis Type",
-            ["Asset Levels", "Cumulative Returns", "Rolling Returns", "Risk Analysis"],
-            key="growth_type"
-        )
-    
-    with col2:
-        if analysis_type in ["Rolling Returns", "Risk Analysis"]:
-            window = st.slider("Rolling Window Size", 1, 24, 12, key="growth_window")
-        else:
-            window = 12
-    
-    # Prepare growth data
-    fig = go.Figure()
-    
-    for idx, (category, data) in enumerate(data_dict.items()):
-        if 'assets' in data and not data['assets'].empty:
-            assets = data['assets']['Value']
-            color = data.get('color', PROFESSIONAL_COLORS[idx % len(PROFESSIONAL_COLORS)])
-            
-            if analysis_type == "Asset Levels":
-                y_data = assets
-                y_title = "Asset Value ($M)"
-                
-            elif analysis_type == "Cumulative Returns":
-                if len(assets) > 0 and assets.iloc[0] != 0:
-                    y_data = 100 * assets / assets.iloc[0]
-                    y_title = "Cumulative Return (%)"
-                else:
-                    continue
-                
-            elif analysis_type == "Rolling Returns":
-                returns = assets.pct_change()
-                if len(returns) >= window:
-                    y_data = returns.rolling(window=window).mean() * 100
-                    y_title = f"{window}-Period Rolling Return (%)"
-                else:
-                    continue
-                
-            elif analysis_type == "Risk Analysis":
-                returns = assets.pct_change()
-                if len(returns) >= window:
-                    y_data = returns.rolling(window=window).std() * 100
-                    y_title = f"{window}-Period Rolling Volatility (%)"
-                else:
-                    continue
-            
-            fig.add_trace(go.Scatter(
-                x=y_data.index,
-                y=y_data,
-                name=f"{category}",
-                mode='lines',
-                line=dict(width=2, color=color),
-                hovertemplate='%{x|%b %Y}<br>' + f'{category}: %{{y:,.2f}}<extra></extra>'
-            ))
-    
-    if len(fig.data) > 0:
-        fig.update_layout(
-            title=f"{analysis_type} Analysis",
-            xaxis_title="Date",
-            yaxis_title=y_title,
-            height=500,
-            hovermode='x unified',
-            plot_bgcolor='white',
-            paper_bgcolor='white'
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("Not enough data for growth analysis")
-
-def create_comprehensive_kpi_dashboard(data_dict):
-    """Create comprehensive KPI dashboard"""
-    latest_date = get_latest_date_info(data_dict)
-    
-    st.markdown(f"""
-    <div class="section-header">
-        <span>Comprehensive KPI Dashboard</span>
-        <span class="date-indicator">Latest Data: {latest_date}</span>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    if not data_dict:
-        st.warning("No data available")
-        return
-    
-    # Calculate comprehensive KPIs
-    total_assets = 0.0
-    category_stats = []
-    fred_data_count = 0
-    
-    for category, data in data_dict.items():
-        if 'assets' in data and not data['assets'].empty:
-            latest_assets = float(data['assets'].iloc[-1, 0])
-            total_assets += latest_assets
-            
-            # Calculate growth metrics
-            assets_series = data['assets']['Value']
-            
-            if len(assets_series) > 12:
-                growth_1y = float((assets_series.iloc[-1] / assets_series.iloc[-13] - 1) * 100)
-            else:
-                growth_1y = 0.0
-            
-            # Check data source
-            is_fred = 'FRED' in data.get('data_source', '')
-            if is_fred:
-                fred_data_count += 1
-            
-            category_stats.append({
-                'Category': category,
-                'Assets': latest_assets,
-                '1Y Growth': growth_1y,
-                'Color': data['color'],
-                'Is_FRED': is_fred
-            })
-    
-    # Create KPI Grid
-    st.markdown("### 📊 Key Performance Indicators")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        # Format total assets appropriately
-        if total_assets >= 1000000:  # Trillions
-            total_display = f"${total_assets/1000000:,.1f}T"
-            scale = "Trillions"
-        elif total_assets >= 1000:  # Billions
-            total_display = f"${total_assets/1000:,.1f}B"
-            scale = "Billions"
-        else:  # Millions
-            total_display = f"${total_assets:,.0f}M"
-            scale = "Millions"
-        
-        st.markdown(f"""
-        <div class='kpi-card'>
-            <div style='font-size: 0.9rem; opacity: 0.9;'>Total Assets</div>
-            <div style='font-size: 1.8rem; font-weight: bold; margin: 0.5rem 0;'>{total_display}</div>
-            <div style='font-size: 0.8rem; opacity: 0.8;'>{len(category_stats)} Categories</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        # Calculate weighted average growth
-        if category_stats and total_assets > 0:
-            weighted_growth = sum(s['Assets'] * s['1Y Growth'] for s in category_stats) / total_assets
-            growth_color = "#27ae60" if weighted_growth > 0 else "#e74c3c"
-            growth_icon = "↗️" if weighted_growth > 0 else "↘️"
-            
-            st.markdown(f"""
-            <div class='kpi-card-secondary'>
-                <div style='font-size: 0.9rem; opacity: 0.9;'>Weighted Growth</div>
-                <div style='font-size: 1.8rem; font-weight: bold; margin: 0.5rem 0; color: {growth_color}'>{growth_icon} {weighted_growth:+.1f}%</div>
-                <div style='font-size: 0.8rem; opacity: 0.8;'>1-Year Annualized</div>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.markdown(f"""
-            <div class='kpi-card-secondary'>
-                <div style='font-size: 0.9rem; opacity: 0.9;'>Weighted Growth</div>
-                <div style='font-size: 1.8rem; font-weight: bold; margin: 0.5rem 0;'>0.0%</div>
-                <div style='font-size: 0.8rem; opacity: 0.8;'>1-Year Annualized</div>
-            </div>
-            """, unsafe_allow_html=True)
-    
-    with col3:
-        # Calculate data quality metric
-        if category_stats:
-            data_quality = (fred_data_count / len(category_stats)) * 100
-        else:
-            data_quality = 0
-        
-        st.markdown(f"""
-        <div class='kpi-card-tertiary'>
-            <div style='font-size: 0.9rem; opacity: 0.9;'>Data Quality</div>
-            <div style='font-size: 1.8rem; font-weight: bold; margin: 0.5rem 0;'>{data_quality:.0f}%</div>
-            <div style='font-size: 0.8rem; opacity: 0.8;'>FRED Data Coverage</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col4:
-        # Count categories with positive growth
-        if category_stats:
-            positive_growth = sum(1 for s in category_stats if s['1Y Growth'] > 0)
-            total_categories = len(category_stats)
-        else:
-            positive_growth = 0
-            total_categories = 0
-        
-        st.markdown(f"""
-        <div class='kpi-card'>
-            <div style='font-size: 0.9rem; opacity: 0.9;'>Growth Distribution</div>
-            <div style='font-size: 1.8rem; font-weight: bold; margin: 0.5rem 0;'>{positive_growth}/{total_categories}</div>
-            <div style='font-size: 0.8rem; opacity: 0.8;'>Categories Growing</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # Asset composition with proper formatting
-    st.markdown("### Asset Composition Analysis")
-    
-    if category_stats:
-        # Create formatted data for display
-        display_stats = []
-        for stat in category_stats:
-            # Format assets appropriately
-            assets = stat['Assets']
-            if assets >= 1000000:  # Trillions
-                assets_display = f"${assets/1000000:,.2f}T"
-            elif assets >= 1000:  # Billions
-                assets_display = f"${assets/1000:,.2f}B"
-            else:  # Millions
-                assets_display = f"${assets:,.0f}M"
-            
-            # Calculate share
-            share = (assets/total_assets*100) if total_assets > 0 else 0
-            
-            display_stats.append({
-                'Category': stat['Category'],
-                'Assets': assets_display,
-                '1Y Growth': f"{stat['1Y Growth']:+.1f}%",
-                'Share of Total': f"{share:.1f}%",
-                'Data Source': 'FRED' if stat['Is_FRED'] else 'Fallback'
-            })
-        
-        display_df = pd.DataFrame(display_stats)
-        st.dataframe(display_df, use_container_width=True, height=300)
-        
-        # Create pie chart
-        fig_pie = go.Figure(data=[go.Pie(
-            labels=[s['Category'] for s in category_stats],
-            values=[s['Assets'] for s in category_stats],
-            hole=0.3,
-            marker_colors=[s['Color'] for s in category_stats],
-            textinfo='label+percent',
-            hovertemplate='<b>%{label}</b><br>Assets: $%{value:,.0f}M<br>Share: %{percent}<extra></extra>'
-        )])
-        
-        fig_pie.update_layout(
-            title='Asset Allocation by Category',
-            height=500,
-            plot_bgcolor='white',
-            paper_bgcolor='white'
-        )
-        
-        st.plotly_chart(fig_pie, use_container_width=True)
-
-def create_advanced_quantitative_analysis(data_dict):
-    """Create professional quantitative analysis without time series decomposition"""
-    latest_date = get_latest_date_info(data_dict)
-    
-    st.markdown(f"""
-    <div class="section-header">
-        <span>Advanced Quantitative Analysis</span>
-        <span class="date-indicator">Latest Data: {latest_date}</span>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    if not data_dict:
-        st.warning("No data available")
-        return
-    
-    # Calculate statistics first
-    data_dict = calculate_comprehensive_statistics(data_dict)
-    
-    # Analysis tabs
-    qa_tab1, qa_tab2, qa_tab3, qa_tab4 = st.tabs([
-        "📊 Statistical Overview",
-        "📈 Return Analysis",
-        "📉 Risk Metrics",
-        "🔍 Correlation Analysis"
-    ])
-    
-    with qa_tab1:
-        st.markdown("##### Comprehensive Statistical Summary")
-        
-        # Create statistics table
-        stats_data = []
-        for category, data in data_dict.items():
-            if 'statistics' in data:
-                stats = data['statistics']
-                
-                # Format assets appropriately
-                mean_assets = stats.get('mean', 0)
-                if mean_assets >= 1000000:  # Trillions
-                    mean_display = f"${mean_assets/1000000:,.2f}T"
-                elif mean_assets >= 1000:  # Billions
-                    mean_display = f"${mean_assets/1000:,.2f}B"
-                else:  # Millions
-                    mean_display = f"${mean_assets:,.0f}M"
-                
-                stats_data.append({
-                    'Category': category,
-                    'Mean Assets': mean_display,
-                    'Annual Growth': f"{stats.get('annual_growth', 0):+.1f}%",
-                    'Std Dev': f"${stats.get('std', 0)/1000:,.1f}B",
-                    'CV': f"{stats.get('cv', 0):.3f}",
-                    'Skewness': f"{stats.get('skewness', 0):.3f}",
-                    'Kurtosis': f"{stats.get('kurtosis', 0):.3f}",
-                    'Data Source': data.get('data_source', 'Unknown')
-                })
-        
-        if stats_data:
-            stats_df = pd.DataFrame(stats_data)
-            st.dataframe(stats_df, use_container_width=True, height=400)
-            
-            # Create visualization of key statistics
-            st.markdown("##### Key Statistics Comparison")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Annual growth comparison
-                growth_data = []
-                for stat in stats_data:
-                    try:
-                        # Extract numeric growth value
-                        growth_str = stat['Annual Growth'].replace('%', '').replace('+', '')
-                        growth = float(growth_str)
-                        growth_data.append({
-                            'Category': stat['Category'],
-                            'Annual Growth': growth
-                        })
-                    except:
-                        continue
-                
-                if growth_data:
-                    growth_df = pd.DataFrame(growth_data)
-                    fig_growth = px.bar(
-                        growth_df,
-                        x='Category',
-                        y='Annual Growth',
-                        title='Annual Growth Rate Comparison',
-                        color='Annual Growth',
-                        color_continuous_scale='RdYlGn',
-                        text_auto='.1f'
-                    )
-                    fig_growth.update_layout(height=400, plot_bgcolor='white', paper_bgcolor='white')
-                    st.plotly_chart(fig_growth, use_container_width=True)
-            
-            with col2:
-                # Coefficient of variation comparison
-                cv_data = []
-                for stat in stats_data:
-                    try:
-                        cv = float(stat['CV'])
-                        cv_data.append({
-                            'Category': stat['Category'],
-                            'Coefficient of Variation': cv
-                        })
-                    except:
-                        continue
-                
-                if cv_data:
-                    cv_df = pd.DataFrame(cv_data)
-                    fig_cv = px.bar(
-                        cv_df,
-                        x='Category',
-                        y='Coefficient of Variation',
-                        title='Relative Volatility (CV)',
-                        color='Coefficient of Variation',
-                        color_continuous_scale='Viridis',
-                        text_auto='.3f'
-                    )
-                    fig_cv.update_layout(height=400, plot_bgcolor='white', paper_bgcolor='white')
-                    st.plotly_chart(fig_cv, use_container_width=True)
-    
-    with qa_tab2:
-        st.markdown("##### Return Analysis")
-        
-        # Select category for detailed return analysis
-        selected_category = st.selectbox(
-            "Select Category for Detailed Analysis",
-            list(data_dict.keys()),
-            key="return_category"
-        )
-        
-        if selected_category:
-            data = data_dict[selected_category]
-            
-            if 'log_returns' in data and not data['log_returns'].empty:
-                returns = data['log_returns']['Log_Return'].dropna()
-                
-                if len(returns) > 0:
-                    # Convert to numpy array and ensure it's 1D
-                    returns_array = returns.values
-                    if returns_array.ndim > 1:
-                        returns_array = returns_array.flatten()
-                    
-                    # Calculate return statistics
-                    if data.get('frequency') == 'monthly':
-                        annual_factor = 12
-                    elif data.get('frequency') == 'quarterly':
-                        annual_factor = 4
-                    else:
-                        annual_factor = 52
-                    
-                    annual_return = returns.mean() * annual_factor
-                    annual_vol = returns.std() * np.sqrt(annual_factor)
-                    sharpe_ratio = annual_return / annual_vol if annual_vol > 0 else 0
-                    
-                    # Display metrics
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric("Annual Return", f"{annual_return:.2f}%")
-                    
-                    with col2:
-                        st.metric("Annual Volatility", f"{annual_vol:.2f}%")
-                    
-                    with col3:
-                        st.metric("Sharpe Ratio", f"{sharpe_ratio:.3f}")
-                    
-                    with col4:
-                        max_dd = data['statistics'].get('max_drawdown', 0)
-                        st.metric("Max Drawdown", f"{max_dd:.2f}%")
-                    
-                    # Return distribution
-                    st.markdown("##### Return Distribution Analysis")
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        # Histogram of returns
-                        fig_hist = px.histogram(
-                            x=returns,
-                            nbins=30,
-                            title=f'{selected_category} - Return Distribution',
-                            labels={'x': 'Monthly Return (%)', 'y': 'Frequency'},
-                            color_discrete_sequence=['#3498db']
-                        )
-                        
-                        # Add normal distribution overlay
-                        x_norm = np.linspace(returns.min(), returns.max(), 100)
-                        y_norm = norm.pdf(x_norm, returns.mean(), returns.std()) * len(returns) * (returns.max() - returns.min()) / 30
-                        
-                        fig_hist.add_trace(go.Scatter(
-                            x=x_norm,
-                            y=y_norm,
-                            mode='lines',
-                            name='Normal Distribution',
-                            line=dict(color='#e74c3c', width=2)
-                        ))
-                        
-                        fig_hist.update_layout(height=400, plot_bgcolor='white', paper_bgcolor='white')
-                        st.plotly_chart(fig_hist, use_container_width=True)
-                    
-                    with col2:
-                        try:
-                            # QQ plot for normality - FIXED VERSION
-                            # Ensure we have a clean 1D array
-                            clean_returns = returns.dropna().values
-                            if clean_returns.ndim > 1:
-                                clean_returns = clean_returns.flatten()
-                            
-                            # Remove any infinite or NaN values
-                            clean_returns = clean_returns[np.isfinite(clean_returns)]
-                            
-                            if len(clean_returns) > 1:
-                                # Use scipy's probplot
-                                qq = stats.probplot(clean_returns, dist="norm")
-                                
-                                fig_qq = go.Figure()
-                                
-                                # Plot the points
-                                fig_qq.add_trace(go.Scatter(
-                                    x=qq[0][0],
-                                    y=qq[0][1],
-                                    mode='markers',
-                                    name='Actual Returns',
-                                    marker=dict(color='#3498db', size=8)
-                                ))
-                                
-                                # Plot the line
-                                x_line = np.array([qq[0][0][0], qq[0][0][-1]])
-                                y_line = qq[1][1] + qq[1][0] * x_line
-                                
-                                fig_qq.add_trace(go.Scatter(
-                                    x=x_line,
-                                    y=y_line,
-                                    mode='lines',
-                                    name='Normal Distribution',
-                                    line=dict(color='#e74c3c', dash='dash')
-                                ))
-                                
-                                fig_qq.update_layout(
-                                    title='Q-Q Plot (Normality Test)',
-                                    xaxis_title='Theoretical Quantiles',
-                                    yaxis_title='Sample Quantiles',
-                                    height=400,
-                                    plot_bgcolor='white',
-                                    paper_bgcolor='white',
-                                    showlegend=True
-                                )
-                                
-                                st.plotly_chart(fig_qq, use_container_width=True)
-                            else:
-                                st.warning("Not enough valid data points for Q-Q plot")
-                                
-                        except Exception as e:
-                            st.warning(f"Could not create Q-Q plot: {str(e)}")
-                            # Alternative: create a simple scatter of sorted returns
-                            try:
-                                clean_returns = returns.dropna().values
-                                if clean_returns.ndim > 1:
-                                    clean_returns = clean_returns.flatten()
-                                clean_returns = clean_returns[np.isfinite(clean_returns)]
-                                
-                                if len(clean_returns) > 1:
-                                    sorted_returns = np.sort(clean_returns)
-                                    theoretical_quantiles = np.sort(np.random.normal(np.mean(clean_returns), np.std(clean_returns), len(clean_returns)))
-                                    
-                                    fig_simple = go.Figure()
-                                    fig_simple.add_trace(go.Scatter(
-                                        x=theoretical_quantiles,
-                                        y=sorted_returns,
-                                        mode='markers',
-                                        name='Returns',
-                                        marker=dict(color='#3498db', size=8)
-                                    ))
-                                    
-                                    # Add diagonal line
-                                    min_val = min(theoretical_quantiles.min(), sorted_returns.min())
-                                    max_val = max(theoretical_quantiles.max(), sorted_returns.max())
-                                    fig_simple.add_trace(go.Scatter(
-                                        x=[min_val, max_val],
-                                        y=[min_val, max_val],
-                                        mode='lines',
-                                        name='Normal Line',
-                                        line=dict(color='#e74c3c', dash='dash')
-                                    ))
-                                    
-                                    fig_simple.update_layout(
-                                        title='Return Distribution Plot',
-                                        xaxis_title='Theoretical Quantiles',
-                                        yaxis_title='Sample Quantiles',
-                                        height=400,
-                                        plot_bgcolor='white',
-                                        paper_bgcolor='white',
-                                        showlegend=True
-                                    )
-                                    
-                                    st.plotly_chart(fig_simple, use_container_width=True)
-                            except:
-                                st.info("Could not create alternative distribution plot")
-                    
-                    # Normality test
-                    if len(returns) <= 5000:
-                        try:
-                            # Ensure clean data for Shapiro-Wilk test
-                            test_data = returns.dropna().values
-                            if test_data.ndim > 1:
-                                test_data = test_data.flatten()
-                            test_data = test_data[np.isfinite(test_data)]
-                            
-                            if len(test_data) >= 3 and len(test_data) <= 5000:
-                                stat, p_value = stats.shapiro(test_data)
-                                
-                                st.markdown(f"""
-                                ##### Normality Test Results (Shapiro-Wilk)
-                                - **Test Statistic:** {stat:.4f}
-                                - **p-value:** {p_value:.4f}
-                                - **Interpretation:** {'Returns appear normal (fail to reject H₀)' if p_value > 0.05 else 'Returns do not appear normal (reject H₀)'}
-                                """)
-                            else:
-                                st.info(f"Shapiro-Wilk test requires 3-5000 data points. Available: {len(test_data)}")
-                        except Exception as e:
-                            st.info(f"Could not perform Shapiro-Wilk test: {str(e)}")
-    
-    with qa_tab3:
-        st.markdown("##### Risk Metrics Analysis")
-        
-        # Prepare risk metrics data
-        risk_data = []
-        for category, data in data_dict.items():
-            if 'statistics' in data:
-                stats = data['statistics']
-                
-                risk_data.append({
-                    'Category': category,
-                    'Volatility (%)': stats.get('return_std', 0) * np.sqrt(12) if stats.get('return_std') else 0,
-                    'Max Drawdown (%)': stats.get('max_drawdown', 0),
-                    'Sharpe Ratio': stats.get('sharpe_ratio', 0),
-                    'CV': stats.get('cv', 0)
-                })
-        
-        if risk_data:
-            risk_df = pd.DataFrame(risk_data)
-            
-            # Create risk comparison chart
-            fig_risk = go.Figure()
-            
-            # Add volatility bars
-            fig_risk.add_trace(go.Bar(
-                name='Annual Volatility',
-                x=risk_df['Category'],
-                y=risk_df['Volatility (%)'],
-                marker_color='#e74c3c',
-                text=risk_df['Volatility (%)'].round(2),
-                textposition='auto'
-            ))
-            
-            # Add max drawdown bars
-            fig_risk.add_trace(go.Bar(
-                name='Max Drawdown',
-                x=risk_df['Category'],
-                y=risk_df['Max Drawdown (%)'].abs(),
-                marker_color='#3498db',
-                text=risk_df['Max Drawdown (%)'].round(2),
-                textposition='auto'
-            ))
-            
-            fig_risk.update_layout(
-                title='Risk Metrics Comparison',
-                barmode='group',
-                height=500,
-                plot_bgcolor='white',
-                paper_bgcolor='white',
-                yaxis_title='Percentage (%)'
-            )
-            
-            st.plotly_chart(fig_risk, use_container_width=True)
-            
-            # Sharpe ratio comparison
-            st.markdown("##### Risk-Adjusted Performance (Sharpe Ratio)")
-            
-            fig_sharpe = px.bar(
-                risk_df,
-                x='Category',
-                y='Sharpe Ratio',
-                title='Sharpe Ratio Comparison',
-                color='Sharpe Ratio',
-                color_continuous_scale='RdYlGn',
-                text_auto='.3f'
-            )
-            fig_sharpe.update_layout(height=400, plot_bgcolor='white', paper_bgcolor='white')
-            st.plotly_chart(fig_sharpe, use_container_width=True)
-            
-            # Display risk metrics table
-            st.markdown("##### Detailed Risk Metrics")
-            display_risk_df = risk_df.copy()
-            display_risk_df['Volatility (%)'] = display_risk_df['Volatility (%)'].round(2)
-            display_risk_df['Max Drawdown (%)'] = display_risk_df['Max Drawdown (%)'].round(2)
-            display_risk_df['Sharpe Ratio'] = display_risk_df['Sharpe Ratio'].round(3)
-            display_risk_df['CV'] = display_risk_df['CV'].round(3)
-            
-            st.dataframe(display_risk_df, use_container_width=True, height=300)
-    
-    with qa_tab4:
-        st.markdown("##### Correlation Analysis")
-        
-        # Prepare return data for correlation analysis
-        return_data = {}
-        for category, data in data_dict.items():
-            if 'log_returns' in data:
-                returns = data['log_returns']['Log_Return'].dropna()
-                if len(returns) > 0:
-                    return_data[category] = returns
-        
-        if len(return_data) >= 2:
-            # Create correlation matrix
-            corr_df = pd.DataFrame(return_data)
-            correlation_matrix = corr_df.corr()
-            
-            # Enhanced correlation heatmap
-            fig_corr = go.Figure(data=go.Heatmap(
-                z=correlation_matrix.values,
-                x=correlation_matrix.columns,
-                y=correlation_matrix.index,
-                colorscale='RdBu_r',
-                zmin=-1,
-                zmax=1,
-                text=correlation_matrix.round(3).values,
-                texttemplate='%{text}',
-                textfont={"size": 11},
-                hovertemplate='<b>%{y} vs %{x}</b><br>Correlation: %{z:.3f}<extra></extra>'
-            ))
-            
-            fig_corr.update_layout(
-                title='Return Correlation Matrix',
-                height=600,
-                plot_bgcolor='white',
-                paper_bgcolor='white',
-                xaxis=dict(tickangle=45)
-            )
-            
-            st.plotly_chart(fig_corr, use_container_width=True)
-            
-            # Find strong correlations
-            st.markdown("##### Significant Correlations")
-            
-            threshold = st.slider("Correlation Threshold", 0.3, 0.9, 0.5, 0.05, key="corr_threshold")
-            
-            strong_correlations = []
-            for i in range(len(correlation_matrix.columns)):
-                for j in range(i+1, len(correlation_matrix.columns)):
-                    corr = correlation_matrix.iloc[i, j]
-                    if abs(corr) >= threshold:
-                        cat1 = correlation_matrix.columns[i]
-                        cat2 = correlation_matrix.columns[j]
-                        
-                        if corr > 0.7:
-                            strength = "Very Strong Positive"
-                            color = "#27ae60"
-                        elif corr > 0.5:
-                            strength = "Strong Positive"
-                            color = "#2ecc71"
-                        elif corr > 0.3:
-                            strength = "Moderate Positive"
-                            color = "#f1c40f"
-                        elif corr < -0.7:
-                            strength = "Very Strong Negative"
-                            color = "#e74c3c"
-                        elif corr < -0.5:
-                            strength = "Strong Negative"
-                            color = "#c0392b"
-                        else:
-                            strength = "Moderate Negative"
-                            color = "#e67e22"
-                        
-                        strong_correlations.append({
-                            'Pair': f"{cat1} ↔ {cat2}",
-                            'Correlation': f"{corr:.3f}",
-                            'Strength': strength,
-                            'Color': color
-                        })
-            
-            if strong_correlations:
-                # Display as cards
-                cols = st.columns(2)
-                for idx, corr in enumerate(strong_correlations):
-                    with cols[idx % 2]:
-                        st.markdown(f"""
-                        <div style='background-color: white; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; border-left: 4px solid {corr["Color"]}; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
-                            <div style='font-weight: 600; margin-bottom: 0.5rem;'>{corr['Pair']}</div>
-                            <div style='display: flex; justify-content: space-between; align-items: center;'>
-                                <span style='font-size: 1.2rem; font-weight: bold; color: {corr["Color"]};'>{corr['Correlation']}</span>
-                                <span style='font-size: 0.85rem; color: #666666;'>{corr['Strength']}</span>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-            else:
-                st.info(f"No correlations found with |r| ≥ {threshold}")
-
-def create_data_explorer_tab(data_dict):
-    """Create advanced data explorer tab"""
-    st.markdown(f"""
-    <div class="section-header">
-        <span>📊 Advanced Data Explorer</span>
-        <span class="date-indicator">Comprehensive Historical Analysis</span>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    if not data_dict:
-        st.warning("No data available")
-        return
-    
-    # Calculate comprehensive statistics
-    data_dict = calculate_comprehensive_statistics(data_dict)
-    
-    explorer_tab1, explorer_tab2 = st.tabs(["📋 Historical Data Table", "📈 Statistical Summary"])
-    
-    with explorer_tab1:
-        st.markdown("##### Complete Historical Data")
-        
-        # Select category for detailed view
-        selected_category = st.selectbox(
-            "Select Category",
-            list(data_dict.keys()),
-            key="explorer_category"
-        )
-        
-        if selected_category:
-            data = data_dict[selected_category]
-            
-            # Create comprehensive data table
-            if 'assets' in data and not data['assets'].empty:
-                assets_df = data['assets'].copy()
-                flows_df = data['flows'].copy() if 'flows' in data else pd.DataFrame()
-                
-                # Combine data
-                combined_df = assets_df.copy()
-                combined_df.columns = ['Assets']
-                
-                if not flows_df.empty:
-                    combined_df['Flow'] = flows_df['Flow']
-                
-                # Add derived metrics
-                combined_df['Assets_Change'] = combined_df['Assets'].pct_change() * 100
-                combined_df['Cumulative_Return'] = (1 + combined_df['Assets_Change']/100).cumprod() * 100
-                
-                # Format for display
-                display_df = combined_df.copy()
-                display_df.index = display_df.index.strftime('%Y-%m-%d')
-                
-                # Format asset values appropriately
-                def format_assets(val):
-                    if pd.isna(val):
-                        return ''
-                    if val >= 1000000:  # Trillions
-                        return f"${val/1000000:,.3f}T"
-                    elif val >= 1000:  # Billions
-                        return f"${val/1000:,.3f}B"
-                    else:  # Millions
-                        return f"${val:,.0f}M"
-                
-                def format_flow(val):
-                    if pd.isna(val):
-                        return ''
-                    if abs(val) >= 1000:  # Billions
-                        return f"${val/1000:,.3f}B"
-                    else:  # Millions
-                        return f"${val:,.0f}M"
-                
-                # Apply formatting
-                formatted_df = display_df.copy()
-                formatted_df['Assets'] = formatted_df['Assets'].apply(format_assets)
-                if 'Flow' in formatted_df.columns:
-                    formatted_df['Flow'] = formatted_df['Flow'].apply(format_flow)
-                formatted_df['Assets_Change'] = formatted_df['Assets_Change'].apply(lambda x: f"{x:.2f}%" if not pd.isna(x) else '')
-                formatted_df['Cumulative_Return'] = formatted_df['Cumulative_Return'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else '')
-                
-                # Display table
-                st.dataframe(formatted_df, use_container_width=True, height=400)
-                
-                # Download option
-                csv = combined_df.to_csv()
-                st.download_button(
-                    label="📥 Download Data as CSV",
-                    data=csv,
-                    file_name=f"{selected_category.replace(' ', '_')}_data.csv",
-                    mime="text/csv"
-                )
-    
-    with explorer_tab2:
-        st.markdown("##### Comprehensive Statistical Summary")
-        
-        # Create statistics table for all categories
-        stats_data = []
-        for category, data in data_dict.items():
-            if 'statistics' in data:
-                stats = data['statistics']
-                
-                # Format mean assets appropriately
-                mean_assets = stats.get('mean', 0)
-                if mean_assets >= 1000000:  # Trillions
-                    mean_display = f"${mean_assets/1000000:,.3f}T"
-                elif mean_assets >= 1000:  # Billions
-                    mean_display = f"${mean_assets/1000:,.3f}B"
-                else:  # Millions
-                    mean_display = f"${mean_assets:,.0f}M"
-                
-                # Format standard deviation
-                std_assets = stats.get('std', 0)
-                if std_assets >= 1000000:  # Trillions
-                    std_display = f"${std_assets/1000000:,.3f}T"
-                elif std_assets >= 1000:  # Billions
-                    std_display = f"${std_assets/1000:,.3f}B"
-                else:  # Millions
-                    std_display = f"${std_assets:,.0f}M"
-                
-                stats_data.append({
-                    'Category': category,
-                    'Mean Assets': mean_display,
-                    'Std Dev': std_display,
-                    'Annual Growth': f"{stats.get('annual_growth', 0):+.2f}%",
-                    'CV': f"{stats.get('cv', 0):.3f}",
-                    'Skewness': f"{stats.get('skewness', 0):.3f}",
-                    'Kurtosis': f"{stats.get('kurtosis', 0):.3f}",
-                    'Sharpe Ratio': f"{stats.get('sharpe_ratio', 0):.3f}" if stats.get('sharpe_ratio') else "N/A",
-                    'Max Drawdown': f"{stats.get('max_drawdown', 0):.2f}%" if stats.get('max_drawdown') else "N/A",
-                    'Data Source': data.get('data_source', 'Unknown')
-                })
-        
-        if stats_data:
-            stats_df = pd.DataFrame(stats_data)
-            st.dataframe(stats_df, use_container_width=True, height=400)
-
-def main():
-    """Main application function"""
-    
-    # Test API key first
-    api_valid, api_message = test_fred_api()
-    
+    # --- SIDEBAR CONFIGURATION ---
     with st.sidebar:
         st.markdown("### ⚙️ Configuration Panel")
         
-        # Display API status
-        if api_valid:
-            st.success(api_message)
-        else:
-            st.error(api_message)
-        
-        frequency = st.selectbox(
-            "Data Frequency",
-            ["monthly", "quarterly"],
-            help="Select data frequency (quarterly recommended for most FRED series)"
-        )
-        
-        st.session_state.frequency = frequency
-        
-        years_back = st.slider(
-            "Analysis Period (Years)",
-            1, 30, 10,
-            help="Number of years of historical data to analyze"
-        )
-        
-        start_date = (datetime.today() - timedelta(days=years_back*365)).strftime('%Y-%m-%d')
-        
-        st.markdown("### 📊 Fund Categories")
-        st.caption("Select categories to analyze")
-        
-        selected_categories = []
-        for category, series_info in FRED_SERIES.items():
-            if st.checkbox(
-                f"{category} ({series_info['fred_id']})", 
-                value=True if category in ['Total Mutual Fund Assets', 'Equity Fund Assets', 'Bond Fund Assets'] else False,
-                help=f"{series_info['description']}"
-            ):
-                selected_categories.append(category)
-        
-        if not selected_categories:
-            st.warning("Please select at least one fund category")
-            return
-        
-        st.markdown("### 🔧 Analysis Settings")
-        show_quantitative = st.checkbox("Show Quantitative Analysis", value=True)
-        show_data_explorer = st.checkbox("Show Advanced Data Explorer", value=True)
+        # Date selection
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input(
+                "Start Date",
+                datetime.now() - timedelta(days=365*2),
+                help="Start date for historical data"
+            )
+        with col2:
+            end_date = st.date_input(
+                "End Date",
+                datetime.now(),
+                help="End date for historical data"
+            )
         
         st.markdown("---")
-        if st.button("🔄 Refresh Analysis", type="secondary"):
-            st.cache_data.clear()
-            st.rerun()
+        st.markdown("### 📊 Optimization Parameters")
         
+        # Risk-free rate
+        risk_free_rate = st.slider(
+            "Annual Risk-Free Rate (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=RISK_FREE_RATE * 100,
+            step=0.5,
+            help="Turkish risk-free rate (approximated by government bond yields)"
+        ) / 100
+        
+        # Optimization strategy
+        strategy = st.selectbox(
+            "Optimization Strategy",
+            ['max_sharpe', 'min_volatility', 'efficient_risk', 
+             'efficient_return', 'max_quadratic_utility', 
+             'hrp', 'cvar', 'equal_weight', 'risk_parity'],
+            format_func=lambda x: x.replace('_', ' ').title(),
+            help="Select portfolio optimization methodology"
+        )
+        
+        # Strategy-specific parameters
+        if strategy in ['efficient_risk', 'efficient_return']:
+            target_value = st.slider(
+                f"Target {'Risk' if strategy == 'efficient_risk' else 'Return'} (%)",
+                min_value=5.0,
+                max_value=80.0,
+                value=30.0 if strategy == 'efficient_risk' else 25.0,
+                step=1.0
+            ) / 100
+        
+        if strategy == 'max_quadratic_utility':
+            risk_aversion = st.slider(
+                "Risk Aversion Coefficient",
+                min_value=0.1,
+                max_value=10.0,
+                value=1.0,
+                step=0.1,
+                help="Higher values indicate greater risk aversion"
+            )
+        
+        # Weight constraints
         st.markdown("---")
-        st.markdown("""
-        ### 📈 Advanced Analytics Features
-        
-        **Key Features:**
-        
-        1. **Real FRED API Integration**
-           - Verified working series IDs
-           - Proper scale handling (Millions/Billions/Trillions)
-           - Realistic fallback data when needed
-        
-        2. **Professional Quantitative Analysis**
-           - Comprehensive statistical overview
-           - Return distribution analysis
-           - Risk metrics comparison
-           - Correlation analysis
-        
-        3. **Proper Scale Formatting**
-           - Automatic scaling (M/B/T)
-           - Consistent formatting across all metrics
-           - Clear value representation
-        
-        4. **Data Explorer**
-           - Historical data tables
-           - Statistical summaries
-           - Data download functionality
-        """)
-    
-    # Header with proper scale information
-    st.markdown(f"""
-    <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1.5rem; border-radius: 10px; margin-bottom: 2rem;'>
-        <h3 style='color: white; margin-top: 0;'>📊 Federal Reserve Economic Data (FRED) Analytics</h3>
-        <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-top: 1rem;'>
-            <div>
-                <div style='font-size: 0.9rem; opacity: 0.9;'>Analysis Period</div>
-                <div style='font-size: 1.2rem; font-weight: bold;'>{years_back} Years</div>
-            </div>
-            <div>
-                <div style='font-size: 0.9rem; opacity: 0.9;'>Frequency</div>
-                <div style='font-size: 1.2rem; font-weight: bold;'>{frequency.capitalize()}</div>
-            </div>
-            <div>
-                <div style='font-size: 0.9rem; opacity: 0.9;'>Categories</div>
-                <div style='font-size: 1.2rem; font-weight: bold;'>{len(selected_categories)} Selected</div>
-            </div>
-            <div>
-                <div style='font-size: 0.9rem; opacity: 0.9;'>Scale</div>
-                <div style='font-size: 1.2rem; font-weight: bold;'>$M/B/T</div>
-            </div>
-        </div>
-        <div style='font-size: 0.8rem; opacity: 0.8; margin-top: 1rem;'>
-            M = Millions | B = Billions | T = Trillions | All values in USD
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Load data
-    with st.spinner("Fetching data from FRED API..."):
-        data_dict, api_status = load_fund_data(selected_categories, start_date, frequency)
-    
-    if not data_dict:
-        st.error("Failed to load data. Please check your configuration and try again.")
-        return
-    
-    # Display API status summary
-    with st.expander("📡 API Status Summary", expanded=False):
-        fred_count = sum(1 for cat in selected_categories if cat in api_status and api_status[cat]['status'] == 'FRED')
-        total_count = len(selected_categories)
+        st.markdown("### ⚖️ Portfolio Constraints")
         
         col1, col2 = st.columns(2)
         with col1:
-            st.metric("FRED Data Success", f"{fred_count}/{total_count}")
+            min_weight = st.number_input(
+                "Minimum Weight (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=0.0,
+                step=0.5
+            ) / 100
+        with col2:
+            max_weight = st.number_input(
+                "Maximum Weight (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=100.0,
+                step=0.5
+            ) / 100
+        
+        constraints = {'min_weight': min_weight, 'max_weight': max_weight}
+        
+        # Advanced settings
+        with st.expander("Advanced Settings"):
+            use_log_returns = st.checkbox("Use Log Returns", value=True)
+            cov_estimator = st.selectbox(
+                "Covariance Estimator",
+                ['sample_cov', 'semicovariance', 'exp_cov'],
+                help="Method for estimating covariance matrix"
+            )
+            
+            if cov_estimator == 'exp_cov':
+                span = st.slider("Exponential Decay Span", min_value=30, max_value=500, value=180)
+        
+        st.markdown("---")
+        
+        # Action button
+        analyze_button = st.button(
+            "🚀 Run Analysis",
+            type="primary",
+            use_container_width=True
+        )
+    
+    # Main content area
+    if not analyze_button:
+        st.info("👈 Configure parameters in the sidebar and click 'Run Analysis' to begin.")
+        
+        # Display informational cards
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            with st.container():
+                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                st.metric("BIST 30 Stocks", "30", "")
+                st.markdown('</div>', unsafe_allow_html=True)
         
         with col2:
-            success_rate = (fred_count / total_count * 100) if total_count > 0 else 0
-            st.metric("Success Rate", f"{success_rate:.0f}%")
+            with st.container():
+                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                st.metric("Optimization Methods", "9", "")
+                st.markdown('</div>', unsafe_allow_html=True)
         
-        # Detailed status
-        status_df = pd.DataFrame([
-            {
-                'Category': cat,
-                'Series ID': api_status[cat]['series_id'],
-                'Status': '✅ FRED' if api_status[cat]['status'] == 'FRED' else '⚠️ Fallback',
-                'Data Points': api_status[cat]['data_points'],
-                'Message': api_status[cat]['message']
-            }
-            for cat in selected_categories if cat in api_status
-        ])
-        st.dataframe(status_df, use_container_width=True)
+        with col3:
+            with st.container():
+                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                st.metric("Risk Metrics", "25+", "")
+                st.markdown('</div>', unsafe_allow_html=True)
+        
+        return
     
-    st.session_state.data_dict = data_dict
+    # --- DATA FETCHING & PROCESSING ---
+    with st.spinner("📥 Fetching market data..."):
+        try:
+            data, returns, benchmark_data, benchmark_returns = optimizer.fetch_data(
+                start_date=str(start_date),
+                end_date=str(end_date)
+            )
+            
+            if data is None or returns is None:
+                st.error("Failed to fetch data. Please check your internet connection and try again.")
+                return
+            
+            # Calculate expected returns and covariance
+            mu = expected_returns.mean_historical_return(data)
+            
+            if cov_estimator == 'sample_cov':
+                S = risk_models.sample_cov(data)
+            elif cov_estimator == 'semicovariance':
+                S = risk_models.semicovariance(data)
+            elif cov_estimator == 'exp_cov':
+                S = risk_models.exp_cov(data, span=span)
+            
+            # Perform optimization
+            target_return = target_value if 'target_value' in locals() else None
+            risk_aversion = risk_aversion if 'risk_aversion' in locals() else 1.0
+            
+            weights_df, performance, metrics = optimizer.optimize_portfolio(
+                strategy, mu, S, returns, risk_free_rate, 
+                target_return, risk_aversion, constraints
+            )
+            
+            # Recalculate full metrics
+            weights_series = pd.Series(weights_df['Weight']).reindex(returns.columns).fillna(0)
+            metrics, portfolio_returns, cum_returns, drawdown = optimizer.calculate_enhanced_metrics(
+                weights_series, returns, benchmark_returns, risk_free_rate
+            )
+            
+            # Store drawdown series in metrics
+            metrics['drawdown_series'] = drawdown
+            
+        except Exception as e:
+            st.error(f"Error during analysis: {str(e)}")
+            st.exception(e)
+            return
     
-    # Main dashboard tabs
-    main_tabs = st.tabs([
-        "📊 KPI Dashboard",
-        "📈 Growth Analysis",
-        "🔍 Quantitative Analysis",
-        "📋 Data Explorer"
+    st.success("✅ Analysis completed successfully!")
+    
+    # --- TABBED INTERFACE ---
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📊 Portfolio Overview",
+        "📈 Optimization Analysis",
+        "⚠️ Risk Analytics",
+        "📋 Performance Report",
+        "🔍 Advanced Diagnostics"
     ])
     
-    with main_tabs[0]:
-        create_comprehensive_kpi_dashboard(data_dict)
+    # TAB 1: Portfolio Overview
+    with tab1:
+        st.markdown('<div class="sub-header">Portfolio Overview & Composition</div>', unsafe_allow_html=True)
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                "Optimized Portfolio",
+                f"{metrics['Annual Return']:.2%}",
+                f"Sharpe: {metrics['Sharpe Ratio']:.2f}"
+            )
+        
+        with col2:
+            st.metric(
+                "Portfolio Volatility",
+                f"{metrics['Annual Volatility']:.2%}",
+                f"Max DD: {metrics['Max Drawdown']:.2%}"
+            )
+        
+        with col3:
+            st.metric(
+                "Risk-Adjusted Return",
+                f"{metrics['Sortino Ratio']:.2f}",
+                f"Omega: {metrics['Omega Ratio']:.2f}"
+            )
+        
+        with col4:
+            st.metric(
+                "Benchmark (XU100)",
+                f"{benchmark_returns['XU100.IS'].mean() * 252:.2%}" if 'XU100.IS' in benchmark_returns.columns else "N/A",
+                f"Beta: {metrics['Beta']:.2f}"
+            )
+        
+        # Portfolio composition
+        st.markdown("### Portfolio Composition")
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            # Weight distribution pie chart
+            fig_weights = go.Figure(data=[
+                go.Pie(
+                    labels=weights_df.index,
+                    values=weights_df['Weight'],
+                    hole=0.4,
+                    textinfo='label+percent',
+                    marker=dict(colors=px.colors.qualitative.Set3)
+                )
+            ])
+            
+            fig_weights.update_layout(
+                title="Portfolio Weight Distribution",
+                height=400,
+                showlegend=False
+            )
+            
+            st.plotly_chart(fig_weights, use_container_width=True)
+        
+        with col2:
+            # Top holdings table
+            st.dataframe(
+                weights_df.head(10).style.format({'Weight': '{:.2%}'})
+                .background_gradient(subset=['Weight'], cmap='Blues'),
+                use_container_width=True,
+                height=400
+            )
+        
+        # Performance chart
+        st.markdown("### Performance Timeline")
+        
+        fig_perf = go.Figure()
+        
+        # Portfolio cumulative returns
+        fig_perf.add_trace(go.Scatter(
+            x=cum_returns.index,
+            y=cum_returns.values,
+            mode='lines',
+            name='Portfolio',
+            line=dict(color='#3B82F6', width=3)
+        ))
+        
+        # Benchmark if available
+        if 'XU100.IS' in benchmark_returns.columns:
+            bench_cum = np.exp(benchmark_returns['XU100.IS'].reindex(cum_returns.index).fillna(0).cumsum())
+            fig_perf.add_trace(go.Scatter(
+                x=bench_cum.index,
+                y=bench_cum.values,
+                mode='lines',
+                name='XU100 Index',
+                line=dict(color='#6B7280', width=2, dash='dash')
+            ))
+        
+        fig_perf.update_layout(
+            title="Cumulative Performance vs Benchmark",
+            yaxis_title="Cumulative Return",
+            xaxis_title="Date",
+            hovermode='x unified',
+            height=500,
+            template='plotly_white'
+        )
+        
+        st.plotly_chart(fig_perf, use_container_width=True)
     
-    with main_tabs[1]:
-        create_professional_growth_charts(data_dict)
+    # TAB 2: Optimization Analysis
+    with tab2:
+        st.markdown('<div class="sub-header">Portfolio Optimization Analysis</div>', unsafe_allow_html=True)
+        
+        # Efficient Frontier
+        st.markdown("### Efficient Frontier Analysis")
+        
+        ef_fig = optimizer.plot_enhanced_efficient_frontier(mu, S, returns, strategy)
+        if ef_fig:
+            st.plotly_chart(ef_fig, use_container_width=True)
+        
+        # Optimization comparison
+        st.markdown("### Optimization Method Comparison")
+        
+        strategies_to_compare = ['max_sharpe', 'min_volatility', 'equal_weight', 'risk_parity', 'hrp']
+        comparison_results = []
+        
+        for strat in strategies_to_compare:
+            try:
+                w_df, perf, met = optimizer.optimize_portfolio(strat, mu, S, returns, risk_free_rate)
+                comparison_results.append({
+                    'Strategy': strat.replace('_', ' ').title(),
+                    'Return': perf[0],
+                    'Volatility': perf[1],
+                    'Sharpe': perf[2],
+                    'Max DD': met['Max Drawdown'],
+                    'Sortino': met['Sortino Ratio'],
+                    'Number of Assets': len(w_df)
+                })
+            except:
+                continue
+        
+        if comparison_results:
+            comp_df = pd.DataFrame(comparison_results)
+            
+            # Display comparison table
+            st.dataframe(
+                comp_df.style.format({
+                    'Return': '{:.2%}',
+                    'Volatility': '{:.2%}',
+                    'Sharpe': '{:.2f}',
+                    'Max DD': '{:.2%}',
+                    'Sortino': '{:.2f}'
+                }).background_gradient(subset=['Sharpe', 'Sortino'], cmap='RdYlGn')
+                .background_gradient(subset=['Volatility', 'Max DD'], cmap='RdYlGn_r'),
+                use_container_width=True
+            )
+            
+            # Radar chart for strategy comparison
+            categories = ['Return', 'Volatility', 'Sharpe', 'Sortino']
+            
+            fig_radar = go.Figure()
+            
+            for idx, row in comp_df.iterrows():
+                fig_radar.add_trace(go.Scatterpolar(
+                    r=[row['Return']*100, row['Volatility']*100, row['Sharpe']*2, row['Sortino']*2],
+                    theta=categories,
+                    fill='toself',
+                    name=row['Strategy']
+                ))
+            
+            fig_radar.update_layout(
+                polar=dict(
+                    radialaxis=dict(
+                        visible=True,
+                        range=[0, max(comp_df['Return'].max()*150, comp_df['Volatility'].max()*150)]
+                    )),
+                showlegend=True,
+                title="Strategy Comparison Radar Chart",
+                height=500
+            )
+            
+            st.plotly_chart(fig_radar, use_container_width=True)
     
-    with main_tabs[2]:
-        if show_quantitative:
-            create_advanced_quantitative_analysis(data_dict)
-        else:
-            st.info("Enable 'Show Quantitative Analysis' in sidebar to view this section")
+    # TAB 3: Risk Analytics
+    with tab3:
+        st.markdown('<div class="sub-header">Comprehensive Risk Analytics</div>', unsafe_allow_html=True)
+        
+        # Risk metrics dashboard
+        st.markdown("### Risk Metrics Dashboard")
+        
+        # Create columns for risk metrics
+        risk_col1, risk_col2, risk_col3, risk_col4 = st.columns(4)
+        
+        with risk_col1:
+            st.metric("Value at Risk (95%)", f"{metrics['VaR (95% Historical)']:.2%}")
+            st.metric("Conditional VaR", f"{metrics['CVaR (95%)']:.2%}")
+        
+        with risk_col2:
+            st.metric("Tail Ratio", f"{metrics['Tail Ratio (99%/95%)']:.2f}")
+            st.metric("Gain/Loss Ratio", f"{metrics['Gain/Loss Ratio']:.2f}")
+        
+        with risk_col3:
+            st.metric("Skewness", f"{metrics['Skewness']:.2f}")
+            st.metric("Kurtosis", f"{metrics['Kurtosis']:.2f}")
+        
+        with risk_col4:
+            st.metric("Jarque-Bera Stat", f"{metrics['Jarque-Bera Stat']:.2f}")
+            pval = metrics['Jarque-Bera p-value']
+            sig = "🚨" if pval < 0.05 else "✅"
+            st.metric("JB p-value", f"{pval:.4f}", sig)
+        
+        # Risk report dashboard
+        st.markdown("### Comprehensive Risk Report")
+        
+        risk_fig = optimizer.create_risk_report_dashboard(metrics, portfolio_returns, benchmark_returns)
+        if risk_fig:
+            st.plotly_chart(risk_fig, use_container_width=True)
+        
+        # GARCH Analysis
+        st.markdown("### Volatility Forecasting (GARCH)")
+        
+        garch_params, conditional_vol, garch_stats, residuals = calculate_enhanced_garch(portfolio_returns)
+        
+        if garch_params:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # GARCH parameters table
+                st.markdown("**GARCH Model Parameters**")
+                garch_df = pd.DataFrame.from_dict(garch_stats, orient='index')
+                st.dataframe(
+                    garch_df.style.format({
+                        'Estimate': '{:.6f}',
+                        'Std. Error': '{:.6f}',
+                        't-Statistic': '{:.2f}',
+                        'p-Value': '{:.4f}'
+                    }),
+                    use_container_width=True
+                )
+            
+            with col2:
+                # GARCH diagnostics
+                st.markdown("**Model Diagnostics**")
+                diag_data = {
+                    'Metric': ['Log Likelihood', 'AIC', 'BIC', 'Persistence', 'Half-Life (days)'],
+                    'Value': [
+                        garch_params['Log Likelihood'],
+                        garch_params['AIC'],
+                        garch_params['BIC'],
+                        garch_params['Persistence'],
+                        garch_params['Half-Life (days)']
+                    ]
+                }
+                diag_df = pd.DataFrame(diag_data)
+                st.dataframe(diag_df, use_container_width=True)
+            
+            # Conditional volatility plot
+            st.markdown("**Conditional Volatility Forecast**")
+            
+            fig_garch = go.Figure()
+            
+            # Historical volatility
+            fig_garch.add_trace(go.Scatter(
+                x=conditional_vol.index,
+                y=conditional_vol.values * np.sqrt(252) * 100,
+                mode='lines',
+                name='GARCH Volatility',
+                line=dict(color='#EF4444', width=2)
+            ))
+            
+            # Rolling volatility
+            rolling_vol = portfolio_returns.rolling(21).std() * np.sqrt(252) * 100
+            fig_garch.add_trace(go.Scatter(
+                x=rolling_vol.index,
+                y=rolling_vol.values,
+                mode='lines',
+                name='21-Day Rolling Vol',
+                line=dict(color='#3B82F6', width=1, dash='dash')
+            ))
+            
+            fig_garch.update_layout(
+                title="Conditional Volatility (Annualized %)",
+                yaxis_title="Volatility (%)",
+                xaxis_title="Date",
+                height=400,
+                template='plotly_white'
+            )
+            
+            st.plotly_chart(fig_garch, use_container_width=True)
+        
+        # Stress Testing
+        st.markdown("### Stress Testing Scenarios")
+        
+        stress_results = perform_stress_test(portfolio_returns, {})
+        
+        if stress_results:
+            stress_df = pd.DataFrame.from_dict(stress_results, orient='index')
+            st.dataframe(
+                stress_df.style.format({
+                    'Total Return': '{:.2%}',
+                    'Worst Day': '{:.2%}',
+                    'Best Day': '{:.2%}',
+                    'Volatility': '{:.2%}',
+                    'Max Drawdown': '{:.2%}'
+                }).background_gradient(subset=['Total Return', 'Max Drawdown'], cmap='RdYlGn_r'),
+                use_container_width=True
+            )
     
-    with main_tabs[3]:
-        if show_data_explorer:
-            create_data_explorer_tab(data_dict)
-        else:
-            st.info("Enable 'Show Advanced Data Explorer' in sidebar to view this section")
+    # TAB 4: Performance Report
+    with tab4:
+        st.markdown('<div class="sub-header">Comprehensive Performance Report</div>', unsafe_allow_html=True)
+        
+        # Generate detailed performance report
+        st.markdown("### Performance Metrics Summary")
+        
+        # Categorize metrics
+        return_metrics = {
+            'Annual Return': metrics['Annual Return'],
+            'Cumulative Return': metrics['Cumulative Return'],
+            'Active Return': metrics['Active Return'],
+            'Alpha': metrics['Alpha']
+        }
+        
+        risk_metrics = {
+            'Annual Volatility': metrics['Annual Volatility'],
+            'Max Drawdown': metrics['Max Drawdown'],
+            'VaR (95% Historical)': metrics['VaR (95% Historical)'],
+            'CVaR (95%)': metrics['CVaR (95%)'],
+            'Tracking Error': metrics['Tracking Error']
+        }
+        
+        risk_adjusted_metrics = {
+            'Sharpe Ratio': metrics['Sharpe Ratio'],
+            'Sortino Ratio': metrics['Sortino Ratio'],
+            'Information Ratio': metrics['Information Ratio'],
+            'Calmar Ratio': metrics['Calmar Ratio'],
+            'Treynor Ratio': metrics['Treynor Ratio'],
+            'Omega Ratio': metrics['Omega Ratio']
+        }
+        
+        statistical_metrics = {
+            'Skewness': metrics['Skewness'],
+            'Kurtosis': metrics['Kurtosis'],
+            'Win Rate': metrics['Win Rate'],
+            'Avg Win / Avg Loss': metrics['Avg Win / Avg Loss']
+        }
+        
+        # Display metrics in expandable sections
+        with st.expander("📈 Return Metrics", expanded=True):
+            col1, col2, col3, col4 = st.columns(4)
+            metrics_cols = [col1, col2, col3, col4]
+            
+            for idx, (metric, value) in enumerate(return_metrics.items()):
+                with metrics_cols[idx % 4]:
+                    st.metric(
+                        metric,
+                        f"{value:.2%}" if 'Return' in metric or metric == 'Alpha' else f"{value:.4f}"
+                    )
+        
+        with st.expander("⚠️ Risk Metrics"):
+            col1, col2, col3, col4, col5 = st.columns(5)
+            risk_cols = [col1, col2, col3, col4, col5]
+            
+            for idx, (metric, value) in enumerate(risk_metrics.items()):
+                with risk_cols[idx % 5]:
+                    st.metric(metric, f"{value:.2%}")
+        
+        with st.expander("📊 Risk-Adjusted Return Metrics"):
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
+            adj_cols = [col1, col2, col3, col4, col5, col6]
+            
+            for idx, (metric, value) in enumerate(risk_adjusted_metrics.items()):
+                with adj_cols[idx % 6]:
+                    st.metric(metric, f"{value:.3f}")
+        
+        with st.expander("📐 Statistical Properties"):
+            col1, col2, col3, col4 = st.columns(4)
+            stat_cols = [col1, col2, col3, col4]
+            
+            for idx, (metric, value) in enumerate(statistical_metrics.items()):
+                with stat_cols[idx % 4]:
+                    st.metric(metric, f"{value:.3f}")
+        
+        # Performance attribution
+        st.markdown("### Performance Attribution")
+        
+        if 'XU100.IS' in benchmark_returns.columns:
+            # Calculate active returns decomposition
+            active_returns = portfolio_returns - benchmark_returns['XU100.IS'].reindex(portfolio_returns.index).fillna(0)
+            
+            fig_attribution = go.Figure()
+            
+            fig_attribution.add_trace(go.Bar(
+                x=active_returns.resample('M').sum().index.strftime('%Y-%m'),
+                y=active_returns.resample('M').sum().values * 100,
+                name='Monthly Active Return',
+                marker_color='#3B82F6'
+            ))
+            
+            fig_attribution.update_layout(
+                title="Monthly Active Return vs Benchmark",
+                yaxis_title="Active Return (%)",
+                xaxis_title="Month",
+                height=400,
+                template='plotly_white'
+            )
+            
+            st.plotly_chart(fig_attribution, use_container_width=True)
+        
+        # Download report
+        st.markdown("### Export Report")
+        
+        # Create downloadable DataFrame
+        report_data = {
+            **return_metrics,
+            **risk_metrics,
+            **risk_adjusted_metrics,
+            **statistical_metrics
+        }
+        
+        report_df = pd.DataFrame.from_dict(report_data, orient='index', columns=['Value'])
+        
+        # Convert to CSV
+        csv = report_df.to_csv()
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.download_button(
+                label="📥 Download Performance Report (CSV)",
+                data=csv,
+                file_name=f"portfolio_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv"
+            )
+        
+        with col2:
+            st.download_button(
+                label="📥 Download Portfolio Weights (CSV)",
+                data=weights_df.to_csv(),
+                file_name=f"portfolio_weights_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv"
+            )
     
-    # Footer
-    st.markdown("---")
-    st.markdown("""
-    <div class="footer">
-        <div style="display: flex; justify-content: center; gap: 2rem; margin-bottom: 1rem;">
-            <span>📊 Institutional Fund Flow Analytics</span>
-            <span>•</span>
-            <span>📈 Powered by FRED API</span>
-            <span>•</span>
-            <span>🔒 Professional Analysis Tool</span>
-        </div>
-        <div style="font-size: 0.8rem; color: #666666;">
-            Data Sources: FRED Economic Data | Last Updated: {}
-            <br>
-            For professional use only. All values in millions of USD unless specified.
-        </div>
-    </div>
-    """.format(datetime.today().strftime('%B %d, %Y')), unsafe_allow_html=True)
+    # TAB 5: Advanced Diagnostics
+    with tab5:
+        st.markdown('<div class="sub-header">Advanced Quantitative Diagnostics</div>', unsafe_allow_html=True)
+        
+        # Market regime detection
+        st.markdown("### Market Regime Analysis")
+        
+        # Calculate volatility regimes
+        volatility_regimes = pd.qcut(portfolio_returns.rolling(21).std().dropna(), q=3, labels=['Low', 'Medium', 'High'])
+        
+        fig_regime = go.Figure()
+        
+        # Color points by regime
+        colors = {'Low': '#10B981', 'Medium': '#F59E0B', 'High': '#EF4444'}
+        
+        for regime in ['Low', 'Medium', 'High']:
+            mask = volatility_regimes == regime
+            if mask.any():
+                fig_regime.add_trace(go.Scatter(
+                    x=portfolio_returns[mask].index,
+                    y=portfolio_returns[mask].values * 100,
+                    mode='markers',
+                    name=f'{regime} Volatility Regime',
+                    marker=dict(size=6, color=colors[regime]),
+                    opacity=0.6
+                ))
+        
+        fig_regime.update_layout(
+            title="Market Regime Detection (by Volatility)",
+            yaxis_title="Daily Return (%)",
+            xaxis_title="Date",
+            height=400,
+            template='plotly_white'
+        )
+        
+        st.plotly_chart(fig_regime, use_container_width=True)
+        
+        # Correlation analysis
+        st.markdown("### Correlation Structure Analysis")
+        
+        # Calculate correlation matrix
+        corr_matrix = returns.corr()
+        
+        fig_corr = go.Figure(data=go.Heatmap(
+            z=corr_matrix.values,
+            x=corr_matrix.columns,
+            y=corr_matrix.index,
+            colorscale='RdBu',
+            zmid=0,
+            colorbar=dict(title="Correlation")
+        ))
+        
+        fig_corr.update_layout(
+            title="Asset Correlation Matrix",
+            height=600,
+            xaxis_title="Assets",
+            yaxis_title="Assets"
+        )
+        
+        st.plotly_chart(fig_corr, use_container_width=True)
+        
+        # Portfolio sensitivity analysis
+        st.markdown("### Portfolio Sensitivity Analysis")
+        
+        # Vary risk-free rate and see impact
+        rf_range = np.linspace(risk_free_rate * 0.5, risk_free_rate * 1.5, 20)
+        sharpe_values = []
+        
+        for rf in rf_range:
+            # Recalculate Sharpe with different RF
+            sharpe = (metrics['Annual Return'] - rf) / metrics['Annual Volatility'] if metrics['Annual Volatility'] > 0 else 0
+            sharpe_values.append(sharpe)
+        
+        fig_sensitivity = go.Figure()
+        
+        fig_sensitivity.add_trace(go.Scatter(
+            x=rf_range * 100,
+            y=sharpe_values,
+            mode='lines+markers',
+            name='Sharpe Ratio',
+            line=dict(color='#3B82F6', width=3)
+        ))
+        
+        fig_sensitivity.add_vline(
+            x=risk_free_rate * 100,
+            line_dash="dash",
+            line_color="red",
+            annotation_text="Current RF",
+            annotation_position="top right"
+        )
+        
+        fig_sensitivity.update_layout(
+            title="Sensitivity to Risk-Free Rate",
+            xaxis_title="Risk-Free Rate (%)",
+            yaxis_title="Sharpe Ratio",
+            height=400,
+            template='plotly_white'
+        )
+        
+        st.plotly_chart(fig_sensitivity, use_container_width=True)
+        
+        # Monte Carlo simulation placeholder
+        st.markdown("### Monte Carlo Simulation")
+        
+        if st.button("Run Monte Carlo Simulation", type="secondary"):
+            with st.spinner("Running 10,000 Monte Carlo simulations..."):
+                # Simple Monte Carlo simulation
+                n_simulations = 10000
+                n_days = 252  # 1 year
+                
+                # Parameters
+                mu_daily = portfolio_returns.mean()
+                sigma_daily = portfolio_returns.std()
+                
+                # Generate random walks
+                simulations = np.zeros((n_simulations, n_days))
+                
+                for i in range(n_simulations):
+                    random_returns = np.random.normal(mu_daily, sigma_daily, n_days)
+                    simulations[i] = np.exp(random_returns.cumsum())
+                
+                # Calculate statistics
+                final_values = simulations[:, -1]
+                
+                fig_mc = go.Figure()
+                
+                # Histogram of final values
+                fig_mc.add_trace(go.Histogram(
+                    x=final_values,
+                    nbinsx=50,
+                    name='Final Values',
+                    marker_color='#3B82F6',
+                    opacity=0.7
+                ))
+                
+                # Add vertical lines for statistics
+                fig_mc.add_vline(
+                    x=np.percentile(final_values, 5),
+                    line_dash="dash",
+                    line_color="red",
+                    annotation_text="5% VaR",
+                    annotation_position="top right"
+                )
+                
+                fig_mc.add_vline(
+                    x=np.percentile(final_values, 95),
+                    line_dash="dash",
+                    line_color="green",
+                    annotation_text="95% VaR",
+                    annotation_position="top right"
+                )
+                
+                fig_mc.update_layout(
+                    title="Monte Carlo Simulation Results (1-Year Horizon)",
+                    xaxis_title="Portfolio Value",
+                    yaxis_title="Frequency",
+                    height=400,
+                    template='plotly_white'
+                )
+                
+                st.plotly_chart(fig_mc, use_container_width=True)
+                
+                # Display statistics
+                mc_stats = {
+                    'Mean Final Value': np.mean(final_values),
+                    'Median Final Value': np.median(final_values),
+                    'Std Final Value': np.std(final_values),
+                    '5% Percentile': np.percentile(final_values, 5),
+                    '95% Percentile': np.percentile(final_values, 95),
+                    'Probability of Loss': np.mean(final_values < 1)
+                }
+                
+                mc_df = pd.DataFrame.from_dict(mc_stats, orient='index', columns=['Value'])
+                st.dataframe(mc_df.style.format('{:.4f}'), use_container_width=True)
+
+# ============================================================================
+# 5. APPLICATION ENTRY POINT
+# ============================================================================
 
 if __name__ == "__main__":
-    main()
+    try:
+        main_streamlit_app()
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {str(e)}")
+        st.exception(e)
