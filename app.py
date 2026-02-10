@@ -1,3132 +1,1330 @@
 # ============================================================================
-# 1. CORE IMPORTS & CONFIGURATION
+# BIST ENTERPRISE QUANT PORTFOLIO OPTIMIZATION SUITE
+# Version: 6.0 | Features: Full PyPortfolioOpt + QuantStats Integration
+# Institutional-Grade Analytics & Visualizations
 # ============================================================================
-import warnings
-warnings.filterwarnings('ignore')
 
+import warnings
 import streamlit as st
 import numpy as np
 import pandas as pd
-import yfinance as yf
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
+import plotly.figure_factory as ff
 from datetime import datetime, timedelta
 import scipy.stats as stats
-from scipy.optimize import minimize, differential_evolution, basinhopping
-import matplotlib.pyplot as plt
-import seaborn as sns
-import matplotlib
-matplotlib.use('Agg')
+from scipy.optimize import minimize
+import requests
+import base64
+import logging
+import traceback
+import time
+import os
+import yfinance as yf
+from io import BytesIO
+import json
 
-# PyPortfolioOpt libraries
-from pypfopt import expected_returns, risk_models, EfficientFrontier
-from pypfopt import CLA
-from pypfopt import EfficientCVaR
-from pypfopt import HRPOpt
-from pypfopt import objective_functions
-from pypfopt.discrete_allocation import DiscreteAllocation, get_latest_prices
+# ─────────────────────────────────────────────────────────────────────────────
+# QUANTITATIVE LIBRARIES - ENHANCED IMPORTS
+# ─────────────────────────────────────────────────────────────────────────────
 
-# Advanced quantitative libraries
-from scipy.stats import norm, t, skew, kurtosis, jarque_bera, shapiro, anderson
-from scipy.special import erfinv
-import statsmodels.api as sm
-from statsmodels.tsa.stattools import adfuller, kpss, pacf
-from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
-import ruptures as rpt  # For change point detection
+# PyPortfolioOpt - Enhanced imports with all optimization methods
+try:
+    from pypfopt import (
+        expected_returns, 
+        risk_models, 
+        EfficientFrontier, 
+        HRPOpt, 
+        EfficientCVaR,
+        EfficientSemivariance,
+        CLA,
+        black_litterman,
+        BlackLittermanModel,
+        objective_functions,
+        plotting
+    )
+    from pypfopt.discrete_allocation import DiscreteAllocation, get_latest_prices
+    HAS_PYOPTOPT = True
+except ImportError as e:
+    st.error(f"PyPortfolioOpt import error: {e}")
+    HAS_PYOPTOPT = False
 
-# Machine learning for regime detection
-from sklearn.cluster import KMeans, DBSCAN
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
-from sklearn.mixture import GaussianMixture
+# QuantStats - Enhanced with full reporting
+try:
+    import quantstats as qs
+    qs.extend_pandas()
+    HAS_QUANTSTATS = True
+except ImportError:
+    HAS_QUANTSTATS = False
 
-# ARCH: For Econometric Volatility Forecasting
+# Machine Learning & Econometrics
+try:
+    from sklearn.covariance import LedoitWolf, GraphicalLasso
+    from sklearn.decomposition import PCA
+    from sklearn.preprocessing import StandardScaler
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
+
 try:
     from arch import arch_model
     HAS_ARCH = True
 except ImportError:
     HAS_ARCH = False
 
-# Network analysis
-import networkx as nx
+# RiskMetrics
+try:
+    import riskmetrics as rm
+    HAS_RISKMETRICS = True
+except ImportError:
+    HAS_RISKMETRICS = False
 
-# For PDF reporting
-from fpdf import FPDF
-import base64
-import io
+# Visualization
+try:
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    HAS_SEABORN = True
+except ImportError:
+    HAS_SEABORN = False
 
-# Streamlit Page Configuration
+# Configuration
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+warnings.filterwarnings('ignore')
+
+# Streamlit Configuration
 st.set_page_config(
-    page_title="BIST Institutional Portfolio Analytics Platform",
+    page_title="BIST Quant Portfolio Lab Pro",
     layout="wide",
-    page_icon="📈",
+    page_icon="📊",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for professional institutional styling
+# ─────────────────────────────────────────────────────────────────────────────
+# INSTITUTIONAL CSS THEME
+# ─────────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    /* Main styling */
-    .main-header {
-        font-size: 2.8rem;
-        color: #1E3A8A;
-        font-weight: 800;
-        margin-bottom: 0.5rem;
-        background: linear-gradient(90deg, #1E3A8A, #3B82F6);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        text-align: center;
-    }
-    .sub-header {
-        font-size: 1.8rem;
-        color: #374151;
-        font-weight: 700;
-        margin-top: 2rem;
-        margin-bottom: 1.5rem;
-        border-bottom: 3px solid #3B82F6;
-        padding-bottom: 0.8rem;
-        padding-left: 1rem;
-        background: linear-gradient(90deg, rgba(59, 130, 246, 0.1), transparent);
-    }
-    .section-header {
-        font-size: 1.4rem;
-        color: #4B5563;
-        font-weight: 600;
-        margin-top: 1.5rem;
-        margin-bottom: 1rem;
-        border-left: 4px solid #10B981;
-        padding-left: 1rem;
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;600;700&family=Source+Sans+Pro:wght@400;600&display=swap');
+    
+    :root {
+        --primary-dark: #0a1929;
+        --secondary-dark: #1a2536;
+        --accent-blue: #0066cc;
+        --accent-green: #00cc88;
+        --accent-red: #ff4d4d;
+        --text-primary: #ffffff;
+        --text-secondary: #b0b0b0;
+        --border-color: #2d3748;
     }
     
-    /* Cards and metrics */
-    .metric-card {
-        background: linear-gradient(135deg, #FFFFFF 0%, #F9FAFB 100%);
-        border-radius: 12px;
-        padding: 1.5rem;
-        border: 1px solid #E5E7EB;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.1);
-        transition: all 0.3s ease;
-        height: 100%;
+    .main .block-container {
+        padding-top: 1rem;
+        padding-bottom: 1rem;
     }
+    
+    /* Professional Metrics */
+    .metric-card {
+        background: linear-gradient(135deg, var(--secondary-dark), var(--primary-dark));
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        padding: 1rem;
+        margin: 0.5rem;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    
     .metric-card:hover {
         transform: translateY(-2px);
-        box-shadow: 0 8px 15px rgba(0, 0, 0, 0.1);
-    }
-    .metric-card-danger {
-        border-left: 5px solid #EF4444;
-    }
-    .metric-card-warning {
-        border-left: 5px solid #F59E0B;
-    }
-    .metric-card-success {
-        border-left: 5px solid #10B981;
-    }
-    .metric-card-info {
-        border-left: 5px solid #3B82F6;
+        box-shadow: 0 6px 12px rgba(0, 102, 204, 0.2);
+        border-color: var(--accent-blue);
     }
     
-    /* Alerts and warnings */
-    .warning-box {
-        background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);
-        border: 2px solid #F59E0B;
-        border-radius: 10px;
-        padding: 1.2rem;
-        margin: 1rem 0;
-        box-shadow: 0 2px 4px rgba(245, 158, 11, 0.2);
-    }
-    .success-box {
-        background: linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%);
-        border: 2px solid #10B981;
-        border-radius: 10px;
-        padding: 1.2rem;
-        margin: 1rem 0;
-        box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
-    }
-    .error-box {
-        background: linear-gradient(135deg, #FEE2E2 0%, #FECACA 100%);
-        border: 2px solid #EF4444;
-        border-radius: 10px;
-        padding: 1.2rem;
-        margin: 1rem 0;
-        box-shadow: 0 2px 4px rgba(239, 68, 68, 0.2);
+    /* Custom DataFrames */
+    .stDataFrame {
+        border-radius: 8px;
+        border: 1px solid var(--border-color) !important;
     }
     
-    /* Tabs styling */
+    /* Tabs Styling */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 4px;
-        background-color: #F9FAFB;
-        padding: 8px;
-        border-radius: 10px;
+        gap: 2rem;
+        background-color: var(--secondary-dark);
+        padding: 0.5rem;
+        border-radius: 8px;
     }
+    
     .stTabs [data-baseweb="tab"] {
-        height: 55px;
-        white-space: pre-wrap;
-        background-color: #F3F4F6;
-        border-radius: 8px;
-        gap: 1px;
-        padding: 12px 24px;
-        font-weight: 600;
-        font-size: 1rem;
-        border: 2px solid transparent;
-        transition: all 0.3s ease;
+        height: 3rem;
+        padding-left: 1rem;
+        padding-right: 1rem;
+        background-color: transparent;
+        border-radius: 4px;
+        color: var(--text-secondary);
     }
-    .stTabs [data-baseweb="tab"]:hover {
-        background-color: #E5E7EB;
-        border-color: #D1D5DB;
-    }
+    
     .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, #3B82F6 0%, #1E40AF 100%) !important;
+        background-color: var(--accent-blue) !important;
         color: white !important;
-        border-color: #1E40AF !important;
-        box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);
     }
     
-    /* Plot containers */
-    .plot-container {
-        background: white;
-        border-radius: 12px;
-        padding: 1.5rem;
-        border: 1px solid #E5E7EB;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-        margin: 1.5rem 0;
-    }
-    
-    /* Sidebar styling */
-    .sidebar .sidebar-content {
-        background: linear-gradient(180deg, #1E293B 0%, #0F172A 100%);
-    }
-    
-    /* Dataframe styling */
-    .dataframe {
-        border-radius: 8px;
-        overflow: hidden;
-        border: 1px solid #E5E7EB;
-    }
-    
-    /* Button styling */
-    .stButton button {
-        border-radius: 8px;
+    /* Buttons */
+    .stButton > button {
+        background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+        color: white;
         font-weight: 600;
-        padding: 0.75rem 1.5rem;
+        border: none;
+        border-radius: 6px;
+        padding: 0.5rem 1.5rem;
         transition: all 0.3s ease;
     }
-    .stButton button:hover {
-        transform: translateY(-2px);
+    
+    .stButton > button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 5px 15px rgba(0, 102, 204, 0.3);
     }
     
-    /* Custom progress bar */
-    .stProgress > div > div > div {
-        background: linear-gradient(90deg, #3B82F6, #8B5CF6);
+    /* Headers */
+    h1, h2, h3 {
+        font-family: 'Inter', sans-serif;
+        font-weight: 700;
+        background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 1rem;
     }
     
-    /* Tooltips */
-    .tooltip {
-        position: relative;
-        display: inline-block;
-        border-bottom: 1px dotted black;
-    }
-    
-    /* Grid layout */
-    .grid-container {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-        gap: 1.5rem;
-        margin: 1.5rem 0;
+    /* Sidebar */
+    section[data-testid="stSidebar"] {
+        background-color: var(--primary-dark);
+        border-right: 1px solid var(--border-color);
     }
 </style>
 """, unsafe_allow_html=True)
 
-# ============================================================================
-# 2. CONFIGURATION & CONSTANTS
-# ============================================================================
+# ─────────────────────────────────────────────────────────────────────────────
+# ENHANCED DATA STRUCTURES
+# ─────────────────────────────────────────────────────────────────────────────
 
-# Turkish BIST 30 tickers with company names
-BIST30_TICKERS = {
-    'AKBNK.IS': 'Akbank',
-    'ARCLK.IS': 'Arçelik',
-    'ASELS.IS': 'Aselsan',
-    'BIMAS.IS': 'BİM Birleşik Mağazalar',
-    'DOHOL.IS': 'Doğuş Otomotiv',
-    'EKGYO.IS': 'Emlak Konut GYO',
-    'EREGL.IS': 'Ereğli Demir Çelik',
-    'FROTO.IS': 'Ford Otosan',
-    'GARAN.IS': 'Garanti BBVA',
-    'HALKB.IS': 'Halkbank',
-    'ISCTR.IS': 'İş Bankası',
-    'KCHOL.IS': 'Koç Holding',
-    'KOZAA.IS': 'Koza Altın',
-    'KOZAL.IS': 'Koza Madencilik',
-    'KRDMD.IS': 'Kardemir',
-    'PETKM.IS': 'Petkim',
-    'PGSUS.IS': 'Peugeot',
-    'SAHOL.IS': 'Sabancı Holding',
-    'SASA.IS': 'Sasa Polyester',
-    'SISE.IS': 'Şişecam',
-    'SKBNK.IS': 'Şekerbank',
-    'TCELL.IS': 'Turkcell',
-    'THYAO.IS': 'Turkish Airlines',
-    'TKFEN.IS': 'Tekfen Holding',
-    'TOASO.IS': 'Tofaş',
-    'TTKOM.IS': 'Türk Telekom',
-    'TUPRS.IS': 'Tüpraş',
-    'ULKER.IS': 'Ülker',
-    'VAKBN.IS': 'Vakıfbank',
-    'YKBNK.IS': 'Yapı Kredi Bankası'
+BIST30_TICKERS = [
+    'AKBNK.IS', 'ARCLK.IS', 'ASELS.IS', 'BIMAS.IS', 'DOHOL.IS', 'EKGYO.IS',
+    'EREGL.IS', 'FROTO.IS', 'GARAN.IS', 'GUBRF.IS', 'HALKB.IS', 'HEKTS.IS',
+    'ISCTR.IS', 'KCHOL.IS', 'KOZAA.IS', 'KOZAL.IS', 'KRDMD.IS', 'ODAS.IS',
+    'PETKM.IS', 'PGSUS.IS', 'SAHOL.IS', 'SASA.IS', 'SISE.IS', 'TAVHL.IS',
+    'TCELL.IS', 'THYAO.IS', 'TKFEN.IS', 'TOASO.IS', 'TSKB.IS', 'TTKOM.IS',
+    'TUPRS.IS', 'VAKBN.IS', 'VESTL.IS', 'YKBNK.IS'
+]
+
+SECTOR_MAPPING = {
+    'Banking': ['AKBNK.IS', 'GARAN.IS', 'ISCTR.IS', 'HALKB.IS', 'YKBNK.IS', 'TSKB.IS', 'VAKBN.IS'],
+    'Industry': ['ARCLK.IS', 'ASELS.IS', 'BIMAS.IS', 'DOHOL.IS', 'EREGL.IS', 'GUBRF.IS'],
+    'Automotive': ['FROTO.IS', 'TOASO.IS', 'KCHOL.IS'],
+    'Technology': ['THYAO.IS', 'TCELL.IS', 'TTKOM.IS'],
+    'Energy': ['PETKM.IS', 'TUPRS.IS'],
+    'Holding': ['SAHOL.IS', 'KRDMD.IS'],
+    'Construction': ['EKGYO.IS', 'ODAS.IS'],
+    'Textile': ['SASA.IS'],
+    'Glass': ['SISE.IS'],
+    'Tourism': ['TAVHL.IS'],
+    'Healthcare': ['HEKTS.IS'],
+    'Food': ['PGSUS.IS']
 }
 
-# Benchmark indices
-BENCHMARK_TICKERS = {
-    'XU100.IS': 'BIST 100',
-    'XU030.IS': 'BIST 30',
-    'XU050.IS': 'BIST 50',
-    'GARAN.IS': 'Sector Benchmark (Banking)'
+BENCHMARKS = {
+    'BIST 100': 'XU100.IS',
+    'BIST 30': 'XU030.IS', 
+    'USD/TRY': 'TRY=X',
+    'EUR/TRY': 'EURTRY=X',
+    'Gold': 'GC=F',
+    'S&P 500': '^GSPC'
 }
 
-# Sector classification for BIST 30
-SECTOR_CLASSIFICATION = {
-    'Financials': ['AKBNK.IS', 'GARAN.IS', 'HALKB.IS', 'ISCTR.IS', 'SKBNK.IS', 'VAKBN.IS', 'YKBNK.IS'],
-    'Industrials': ['ARCLK.IS', 'ASELS.IS', 'FROTO.IS', 'TOASO.IS', 'TKFEN.IS', 'SISE.IS'],
-    'Materials': ['EREGL.IS', 'KRDMD.IS', 'PETKM.IS', 'SASA.IS', 'KOZAA.IS', 'KOZAL.IS'],
-    'Consumer Staples': ['BIMAS.IS', 'ULKER.IS'],
-    'Consumer Discretionary': ['DOHOL.IS', 'PGSUS.IS'],
-    'Real Estate': ['EKGYO.IS'],
-    'Communications': ['TCELL.IS', 'TTKOM.IS'],
-    'Transportation': ['THYAO.IS'],
-    'Energy': ['TUPRS.IS'],
-    'Conglomerates': ['KCHOL.IS', 'SAHOL.IS']
-}
-
-# Annualized risk-free rate for Turkey (updated January 2024)
-RISK_FREE_RATE = 0.45  # 45% annual, reflecting current Turkish monetary policy
-
-# Trading days per year
-TRADING_DAYS = 252
-
-# ============================================================================
-# 3. ENHANCED DATA FETCHING & VALIDATION CLASS
-# ============================================================================
-
-class MarketDataFetcher:
-    """Enhanced data fetching with multiple fallback strategies and validation"""
-    
+class EnhancedDataSource:
     def __init__(self):
-        self.tickers = list(BIST30_TICKERS.keys())
-        self.benchmarks = list(BENCHMARK_TICKERS.keys())
         self.cache = {}
         
-    def fetch_with_retry(self, tickers, start_date, end_date, max_retries=3):
-        """Fetch data with retry logic and multiple fallback strategies"""
-        
-        for attempt in range(max_retries):
-            try:
-                # Strategy 1: Try bulk download
-                data = yf.download(
-                    tickers,
-                    start=start_date,
-                    end=end_date,
-                    progress=False,
-                    group_by='ticker',
-                    threads=True
-                )
-                
-                # Handle different data structures
-                if isinstance(data.columns, pd.MultiIndex):
-                    # Multi-index structure (new Yahoo Finance format)
-                    if 'Adj Close' in data.columns.get_level_values(0):
-                        adj_close = data['Adj Close']
-                    elif 'Close' in data.columns.get_level_values(0):
-                        adj_close = data['Close']
-                    else:
-                        # Try to get first available price column
-                        adj_close = data.xs(data.columns[0][0], axis=1, level=0)
-                else:
-                    # Single index structure (old format)
-                    if 'Adj Close' in data.columns:
-                        adj_close = data['Adj Close']
-                    elif 'Close' in data.columns:
-                        adj_close = data['Close']
-                    else:
-                        adj_close = data.iloc[:, 0]  # First column
-                
-                # Convert to DataFrame if Series
-                if isinstance(adj_close, pd.Series):
-                    adj_close = adj_close.to_frame()
-                    adj_close.columns = tickers
-                
-                # Check if we got any data
-                if adj_close.empty:
-                    raise ValueError("No data returned")
-                
-                # Fill missing values using multiple methods
-                adj_close = self._clean_data(adj_close)
-                
-                return adj_close
-                
-            except Exception as e:
-                st.warning(f"Attempt {attempt + 1} failed: {str(e)}")
-                
-                if attempt < max_retries - 1:
-                    # Try individual ticker download as fallback
-                    if len(tickers) > 1:
-                        st.info("Trying individual ticker download...")
-                        return self._fetch_individual(tickers, start_date, end_date)
-                    
-                    # Wait before retry
-                    import time
-                    time.sleep(2 ** attempt)  # Exponential backoff
-        
-        raise Exception(f"Failed to fetch data after {max_retries} attempts")
-    
-    def _fetch_individual(self, tickers, start_date, end_date):
-        """Fetch tickers individually (slower but more reliable)"""
-        data_frames = []
-        
-        for ticker in tickers:
-            try:
-                ticker_data = yf.download(
-                    ticker,
-                    start=start_date,
-                    end=end_date,
-                    progress=False
-                )
-                
-                if not ticker_data.empty:
-                    if 'Adj Close' in ticker_data.columns:
-                        price_series = ticker_data['Adj Close']
-                    elif 'Close' in ticker_data.columns:
-                        price_series = ticker_data['Close']
-                    else:
-                        price_series = ticker_data.iloc[:, 0]
-                    
-                    price_series.name = ticker
-                    data_frames.append(price_series)
-                    
-            except Exception as e:
-                st.warning(f"Failed to fetch {ticker}: {str(e)}")
-                continue
-        
-        if not data_frames:
-            raise ValueError("No data fetched for any ticker")
-        
-        # Combine all series into DataFrame
-        combined_data = pd.concat(data_frames, axis=1)
-        combined_data = self._clean_data(combined_data)
-        
-        return combined_data
-    
-    def _clean_data(self, data):
-        """Clean and validate price data using multiple methods"""
-        
-        # Forward fill for intraday gaps
-        data = data.ffill()
-        
-        # Backward fill for initial missing values
-        data = data.bfill()
-        
-        # Interpolate remaining gaps
-        data = data.interpolate(method='linear', limit_direction='both')
-        
-        # Remove tickers with too many missing values (>20%)
-        missing_pct = data.isnull().sum() / len(data)
-        valid_tickers = missing_pct[missing_pct < 0.2].index
-        data = data[valid_tickers]
-        
-        # Remove rows with excessive missing data
-        data = data.dropna(thresh=len(data.columns) * 0.8)
-        
-        # Validate data quality
-        self._validate_data(data)
-        
-        return data
-    
-    def _validate_data(self, data):
-        """Validate data quality"""
-        
-        if data.empty:
-            raise ValueError("No valid data after cleaning")
-        
-        # Check for extreme values
-        price_changes = data.pct_change().abs()
-        extreme_moves = (price_changes > 0.5).any().any()  # >50% daily moves
-        
-        if extreme_moves:
-            st.warning("⚠️ Extreme price movements detected. Data may need manual verification.")
-        
-        # Check for zero or negative prices
-        negative_prices = (data <= 0).any().any()
-        if negative_prices:
-            st.error("❌ Negative or zero prices detected. Data quality issues.")
-    
-    def fetch_all_data(self, start_date, end_date, use_cache=True):
-        """Fetch all required market data"""
-        
-        cache_key = f"{start_date}_{end_date}"
-        
-        if use_cache and cache_key in self.cache:
-            return self.cache[cache_key]
-        
-        with st.spinner("🌐 Fetching market data from multiple sources..."):
-            # Create progress bar
-            progress_bar = st.progress(0)
-            
-            # Step 1: Fetch BIST 30 stocks
-            progress_bar.progress(10)
-            stock_data = self.fetch_with_retry(self.tickers, start_date, end_date)
-            
-            # Step 2: Fetch benchmarks
-            progress_bar.progress(40)
-            benchmark_data = self.fetch_with_retry(self.benchmarks, start_date, end_date)
-            
-            # Step 3: Calculate returns
-            progress_bar.progress(70)
-            stock_returns = np.log(stock_data / stock_data.shift(1)).dropna()
-            benchmark_returns = np.log(benchmark_data / benchmark_data.shift(1)).dropna()
-            
-            # Step 4: Additional market data
-            progress_bar.progress(90)
-            additional_data = self._fetch_additional_data(start_date, end_date)
-            
-            progress_bar.progress(100)
-            
-            result = {
-                'prices': stock_data,
-                'returns': stock_returns,
-                'benchmark_prices': benchmark_data,
-                'benchmark_returns': benchmark_returns,
-                'additional_data': additional_data
-            }
-            
-            self.cache[cache_key] = result
-            
-            return result
-    
-    def _fetch_additional_data(self, start_date, end_date):
-        """Fetch additional market data (FX, commodities, etc.)"""
-        additional_tickers = {
-            'TRY=X': 'USD/TRY',
-            'EURTRY=X': 'EUR/TRY',
-            'GC=F': 'Gold',
-            'BZ=F': 'Brent Oil',
-            '^VIX': 'VIX Index'
-        }
-        
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def fetch_enhanced_data(_self, tickers, start_date, end_date, interval='1d'):
+        """Enhanced data fetching with multiple price fields"""
         try:
+            # Download OHLCV data
             data = yf.download(
-                list(additional_tickers.keys()),
-                start=start_date,
-                end=end_date,
-                progress=False
+                tickers, 
+                start=start_date, 
+                end=end_date, 
+                interval=interval,
+                progress=False,
+                group_by='ticker',
+                auto_adjust=True
             )
             
-            if isinstance(data.columns, pd.MultiIndex):
-                if 'Adj Close' in data.columns.get_level_values(0):
-                    adj_close = data['Adj Close']
-                else:
-                    adj_close = data['Close']
-            else:
-                adj_close = data['Close'] if 'Close' in data.columns else data
-            
-            return adj_close
-        except:
-            return pd.DataFrame()
-
-# ============================================================================
-# 4. ADVANCED PORTFOLIO OPTIMIZER WITH MACHINE LEARNING
-# ============================================================================
-
-class AdvancedPortfolioOptimizer:
-    """Advanced portfolio optimization with ML techniques and alternative risk measures"""
-    
-    def __init__(self, risk_free_rate=RISK_FREE_RATE):
-        self.risk_free_rate = risk_free_rate
-        self.daily_rf = np.log(1 + risk_free_rate) / TRADING_DAYS
-        self.data_fetcher = MarketDataFetcher()
-        
-    def calculate_advanced_metrics(self, weights, returns, benchmark_returns=None):
-        """Calculate comprehensive portfolio performance metrics"""
-        
-        # Ensure weights are properly normalized
-        weights = weights / weights.sum()
-        
-        # Portfolio returns
-        portfolio_returns = returns.dot(weights)
-        
-        # Calculate all metrics
-        metrics = {}
-        
-        # Basic return metrics
-        metrics.update(self._calculate_return_metrics(portfolio_returns))
-        
-        # Risk metrics
-        metrics.update(self._calculate_risk_metrics(portfolio_returns))
-        
-        # Risk-adjusted return metrics
-        metrics.update(self._calculate_risk_adjusted_metrics(portfolio_returns))
-        
-        # Drawdown metrics
-        metrics.update(self._calculate_drawdown_metrics(portfolio_returns))
-        
-        # Statistical properties
-        metrics.update(self._calculate_statistical_metrics(portfolio_returns))
-        
-        # Tail risk metrics
-        metrics.update(self._calculate_tail_risk_metrics(portfolio_returns))
-        
-        # Benchmark relative metrics (if benchmark provided)
-        if benchmark_returns is not None:
-            metrics.update(self._calculate_benchmark_metrics(portfolio_returns, benchmark_returns))
-        
-        # Advanced ML-based metrics
-        metrics.update(self._calculate_ml_metrics(portfolio_returns))
-        
-        return metrics, portfolio_returns
-    
-    def _calculate_return_metrics(self, returns):
-        """Calculate return-related metrics"""
-        metrics = {}
-        
-        # Daily metrics
-        daily_mean = returns.mean()
-        daily_median = returns.median()
-        daily_std = returns.std()
-        
-        # Annualized metrics
-        annual_return = daily_mean * TRADING_DAYS
-        annual_volatility = daily_std * np.sqrt(TRADING_DAYS)
-        
-        # Cumulative return
-        cumulative_return = np.exp(returns.sum()) - 1
-        
-        metrics.update({
-            'Daily Mean Return': daily_mean,
-            'Daily Median Return': daily_median,
-            'Daily Std Dev': daily_std,
-            'Annualized Return': annual_return,
-            'Annualized Volatility': annual_volatility,
-            'Cumulative Return': cumulative_return,
-            'Geometric Mean Return': np.exp(daily_mean) - 1,
-            'Excess Return (over RF)': annual_return - self.risk_free_rate
-        })
-        
-        return metrics
-    
-    def _calculate_risk_metrics(self, returns):
-        """Calculate risk metrics"""
-        metrics = {}
-        
-        # Basic volatility
-        daily_vol = returns.std()
-        annual_vol = daily_vol * np.sqrt(TRADING_DAYS)
-        
-        # Downside volatility
-        downside_returns = returns[returns < self.daily_rf]
-        downside_vol = downside_returns.std() * np.sqrt(TRADING_DAYS) if len(downside_returns) > 1 else 0
-        
-        # Semi-deviation
-        negative_returns = returns[returns < 0]
-        semi_deviation = negative_returns.std() * np.sqrt(TRADING_DAYS) if len(negative_returns) > 1 else 0
-        
-        metrics.update({
-            'Downside Volatility': downside_vol,
-            'Semi-Deviation': semi_deviation,
-            'Upside Volatility': returns[returns > self.daily_rf].std() * np.sqrt(TRADING_DAYS) 
-                                 if len(returns[returns > self.daily_rf]) > 1 else 0,
-            'Mean Absolute Deviation': returns.mad() * np.sqrt(TRADING_DAYS),
-            'Target Downside Deviation': self._calculate_target_downside_deviation(returns)
-        })
-        
-        return metrics
-    
-    def _calculate_target_downside_deviation(self, returns, target=0):
-        """Calculate target downside deviation (for Sortino ratio)"""
-        downside_diff = returns[returns < target] - target
-        if len(downside_diff) > 1:
-            return np.sqrt(np.mean(downside_diff ** 2)) * np.sqrt(TRADING_DAYS)
-        return 0
-    
-    def _calculate_risk_adjusted_metrics(self, returns):
-        """Calculate risk-adjusted return metrics"""
-        metrics = {}
-        
-        annual_return = returns.mean() * TRADING_DAYS
-        annual_vol = returns.std() * np.sqrt(TRADING_DAYS)
-        
-        # Sharpe Ratio
-        sharpe_ratio = (annual_return - self.risk_free_rate) / annual_vol if annual_vol > 0 else 0
-        
-        # Sortino Ratio
-        downside_vol = self._calculate_target_downside_deviation(returns, self.daily_rf)
-        sortino_ratio = (annual_return - self.risk_free_rate) / downside_vol if downside_vol > 0 else 0
-        
-        # Calmar Ratio
-        max_dd = self._calculate_max_drawdown(returns)
-        calmar_ratio = annual_return / abs(max_dd) if max_dd < 0 else np.inf
-        
-        # Omega Ratio
-        omega_ratio = self._calculate_omega_ratio(returns)
-        
-        # Treynor Ratio (requires beta)
-        treynor_ratio = np.nan  # Will be calculated if benchmark provided
-        
-        # Information Ratio (requires benchmark)
-        information_ratio = np.nan
-        
-        metrics.update({
-            'Sharpe Ratio': sharpe_ratio,
-            'Sortino Ratio': sortino_ratio,
-            'Calmar Ratio': calmar_ratio,
-            'Omega Ratio': omega_ratio,
-            'Treynor Ratio': treynor_ratio,
-            'Information Ratio': information_ratio,
-            'Modified Sharpe Ratio': sharpe_ratio * np.sqrt(TRADING_DAYS),  # Annualized
-            'Gain to Pain Ratio': returns.sum() / abs(returns[returns < 0].sum()) 
-                                 if returns[returns < 0].sum() < 0 else np.inf
-        })
-        
-        return metrics
-    
-    def _calculate_omega_ratio(self, returns, threshold=None):
-        """Calculate Omega ratio"""
-        if threshold is None:
-            threshold = self.daily_rf
-        
-        gains = returns[returns > threshold].sum()
-        losses = abs(returns[returns <= threshold].sum())
-        
-        return gains / losses if losses > 0 else np.inf
-    
-    def _calculate_drawdown_metrics(self, returns):
-        """Calculate drawdown-related metrics"""
-        metrics = {}
-        
-        # Calculate cumulative returns
-        cumulative = np.exp(returns.cumsum())
-        
-        # Calculate running maximum
-        running_max = cumulative.cummax()
-        
-        # Calculate drawdown
-        drawdown = (cumulative - running_max) / running_max
-        
-        # Maximum drawdown
-        max_drawdown = drawdown.min()
-        max_dd_date = drawdown.idxmin() if not drawdown.empty else None
-        
-        # Calculate drawdown duration
-        if max_dd_date is not None:
-            recovery_mask = cumulative.loc[max_dd_date:] >= running_max.loc[max_dd_date]
-            if recovery_mask.any():
-                recovery_date = recovery_mask.idxmax()
-                recovery_days = (recovery_date - max_dd_date).days
-            else:
-                recovery_days = np.nan
-        else:
-            recovery_days = np.nan
-        
-        # Average drawdown
-        avg_drawdown = drawdown.mean()
-        
-        # Drawdown volatility
-        dd_volatility = drawdown.std()
-        
-        metrics.update({
-            'Maximum Drawdown': max_drawdown,
-            'Max Drawdown Date': max_dd_date,
-            'Recovery Days': recovery_days,
-            'Average Drawdown': avg_drawdown,
-            'Drawdown Volatility': dd_volatility,
-            'Ulcer Index': np.sqrt(np.mean(drawdown ** 2)),
-            'Pain Index': abs(drawdown.mean()),
-            'Drawdown Count': (drawdown < -0.05).sum(),  # Count >5% drawdowns
-            'Worst 5 Drawdowns': self._get_top_drawdowns(drawdown, n=5)
-        })
-        
-        return metrics
-    
-    def _get_top_drawdowns(self, drawdown, n=5):
-        """Get top n drawdowns"""
-        drawdown_series = drawdown.copy()
-        top_dd = []
-        
-        for _ in range(min(n, len(drawdown_series))):
-            if drawdown_series.min() < -0.01:  # Only consider >1% drawdowns
-                min_idx = drawdown_series.idxmin()
-                min_val = drawdown_series.min()
-                top_dd.append((min_idx, min_val))
+            # Process data based on number of tickers
+            if len(tickers) > 1:
+                # Multi-ticker case
+                close_prices = pd.DataFrame()
+                open_prices = pd.DataFrame()
+                high_prices = pd.DataFrame()
+                low_prices = pd.DataFrame()
+                volumes = pd.DataFrame()
                 
-                # Remove this drawdown period (±10 days) for next iteration
-                start_idx = max(0, drawdown_series.index.get_loc(min_idx) - 10)
-                end_idx = min(len(drawdown_series), drawdown_series.index.get_loc(min_idx) + 10)
-                drawdown_series.iloc[start_idx:end_idx] = 0
-        
-        return top_dd
-    
-    def _calculate_max_drawdown(self, returns):
-        """Calculate maximum drawdown from returns"""
-        cumulative = np.exp(returns.cumsum())
-        running_max = cumulative.cummax()
-        drawdown = (cumulative - running_max) / running_max
-        return drawdown.min()
-    
-    def _calculate_statistical_metrics(self, returns):
-        """Calculate statistical properties"""
-        metrics = {}
-        
-        # Basic statistics
-        skewness = stats.skew(returns)
-        kurt = stats.kurtosis(returns, fisher=False)  # Pearson's kurtosis
-        excess_kurtosis = kurt - 3
-        
-        # Normality tests
-        jb_stat, jb_pvalue = stats.jarque_bera(returns)
-        shapiro_stat, shapiro_pvalue = stats.shapiro(returns) if len(returns) < 5000 else (np.nan, np.nan)
-        
-        # Serial correlation
-        autocorr_lag1 = returns.autocorr(lag=1)
-        autocorr_lag5 = returns.autocorr(lag=5)
-        
-        # Stationarity tests
-        adf_stat, adf_pvalue = self._adf_test(returns)
-        kpss_stat, kpss_pvalue = self._kpss_test(returns)
-        
-        metrics.update({
-            'Skewness': skewness,
-            'Kurtosis': kurt,
-            'Excess Kurtosis': excess_kurtosis,
-            'Jarque-Bera Statistic': jb_stat,
-            'Jarque-Bera p-value': jb_pvalue,
-            'Shapiro-Wilk Statistic': shapiro_stat,
-            'Shapiro-Wilk p-value': shapiro_pvalue,
-            'Autocorrelation Lag 1': autocorr_lag1,
-            'Autocorrelation Lag 5': autocorr_lag5,
-            'ADF Statistic': adf_stat,
-            'ADF p-value': adf_pvalue,
-            'KPSS Statistic': kpss_stat,
-            'KPSS p-value': kpss_pvalue,
-            'Median Absolute Deviation': stats.median_abs_deviation(returns),
-            'Coefficient of Variation': returns.std() / abs(returns.mean()) if returns.mean() != 0 else np.inf
-        })
-        
-        return metrics
-    
-    def _adf_test(self, series):
-        """Augmented Dickey-Fuller test for stationarity"""
+                for ticker in tickers:
+                    if (ticker, 'Close') in data.columns:
+                        close_prices[ticker] = data[(ticker, 'Close')]
+                        open_prices[ticker] = data[(ticker, 'Open')]
+                        high_prices[ticker] = data[(ticker, 'High')]
+                        low_prices[ticker] = data[(ticker, 'Low')]
+                        volumes[ticker] = data[(ticker, 'Volume')]
+            else:
+                # Single ticker case
+                ticker = tickers[0]
+                close_prices = data['Close'].to_frame(ticker)
+                open_prices = data['Open'].to_frame(ticker)
+                high_prices = data['High'].to_frame(ticker)
+                low_prices = data['Low'].to_frame(ticker)
+                volumes = data['Volume'].to_frame(ticker)
+            
+            # Fill missing values
+            close_prices.ffill(inplace=True)
+            close_prices.bfill(inplace=True)
+            
+            return {
+                'close': close_prices,
+                'open': open_prices,
+                'high': high_prices,
+                'low': low_prices,
+                'volume': volumes,
+                'returns': close_prices.pct_change().dropna()
+            }
+            
+        except Exception as e:
+            st.error(f"Data fetch error: {str(e)}")
+            return None
+            
+    def fetch_fundamental_data(self, ticker):
+        """Fetch fundamental data for a single ticker"""
         try:
-            result = adfuller(series.dropna())
-            return result[0], result[1]
-        except:
-            return np.nan, np.nan
-    
-    def _kpss_test(self, series):
-        """KPSS test for stationarity"""
-        try:
-            result = kpss(series.dropna())
-            return result[0], result[1]
-        except:
-            return np.nan, np.nan
-    
-    def _calculate_tail_risk_metrics(self, returns):
-        """Calculate tail risk metrics"""
-        metrics = {}
-        
-        # VaR at different confidence levels
-        conf_levels = [0.90, 0.95, 0.99]
-        
-        for conf in conf_levels:
-            # Historical VaR
-            hist_var = np.percentile(returns, (1 - conf) * 100)
-            
-            # Parametric VaR (Gaussian)
-            gaussian_var = norm.ppf(1 - conf, returns.mean(), returns.std())
-            
-            # Cornish-Fisher VaR (adjusts for skewness and kurtosis)
-            z = norm.ppf(1 - conf)
-            s = stats.skew(returns)
-            k = stats.kurtosis(returns, fisher=False) - 3
-            
-            cf_z = z + (z**2 - 1) * s/6 + (z**3 - 3*z) * k/24 - (2*z**3 - 5*z) * s**2/36
-            cf_var = returns.mean() + cf_z * returns.std()
-            
-            # Expected Shortfall/CVaR
-            es = returns[returns <= hist_var].mean()
-            
-            metrics.update({
-                f'VaR {int(conf*100)}% (Historical)': hist_var,
-                f'VaR {int(conf*100)}% (Gaussian)': gaussian_var,
-                f'VaR {int(conf*100)}% (Cornish-Fisher)': cf_var,
-                f'CVaR {int(conf*100)}%': es,
-                f'VaR to CVaR Ratio {int(conf*100)}%': abs(hist_var / es) if es != 0 else np.inf
-            })
-        
-        # Tail ratio
-        var_95 = np.percentile(returns, 5)
-        var_99 = np.percentile(returns, 1)
-        tail_ratio = abs(var_99 / var_95) if var_95 != 0 else np.inf
-        
-        # Expected Shortfall ratio
-        es_95 = returns[returns <= var_95].mean()
-        es_ratio = abs(var_95 / es_95) if es_95 != 0 else np.inf
-        
-        metrics.update({
-            'Tail Ratio (99%/95%)': tail_ratio,
-            'ES Ratio (95%)': es_ratio,
-            'Maximum Daily Loss': returns.min(),
-            'Conditional Skewness': self._calculate_conditional_skewness(returns),
-            'Conditional Kurtosis': self._calculate_conditional_kurtosis(returns)
-        })
-        
-        return metrics
-    
-    def _calculate_conditional_skewness(self, returns, threshold=0.05):
-        """Calculate skewness conditional on tail events"""
-        tail_returns = returns[returns <= np.percentile(returns, threshold * 100)]
-        if len(tail_returns) > 2:
-            return stats.skew(tail_returns)
-        return np.nan
-    
-    def _calculate_conditional_kurtosis(self, returns, threshold=0.05):
-        """Calculate kurtosis conditional on tail events"""
-        tail_returns = returns[returns <= np.percentile(returns, threshold * 100)]
-        if len(tail_returns) > 3:
-            return stats.kurtosis(tail_returns, fisher=False)
-        return np.nan
-    
-    def _calculate_benchmark_metrics(self, portfolio_returns, benchmark_returns):
-        """Calculate metrics relative to benchmark"""
-        metrics = {}
-        
-        # Align indices
-        common_idx = portfolio_returns.index.intersection(benchmark_returns.index)
-        port_aligned = portfolio_returns.loc[common_idx]
-        bench_aligned = benchmark_returns.loc[common_idx]
-        
-        if len(port_aligned) < 10:  # Need sufficient overlapping data
-            return metrics
-        
-        # Active returns
-        active_returns = port_aligned - bench_aligned
-        
-        # Beta calculation
-        covariance = np.cov(port_aligned, bench_aligned)[0, 1]
-        bench_variance = np.var(bench_aligned)
-        beta = covariance / bench_variance if bench_variance > 0 else np.nan
-        
-        # Alpha (Jensen's Alpha)
-        port_annual = port_aligned.mean() * TRADING_DAYS
-        bench_annual = bench_aligned.mean() * TRADING_DAYS
-        alpha = port_annual - (self.risk_free_rate + beta * (bench_annual - self.risk_free_rate))
-        
-        # Tracking error
-        tracking_error = active_returns.std() * np.sqrt(TRADING_DAYS)
-        
-        # Information ratio
-        information_ratio = active_returns.mean() * TRADING_DAYS / tracking_error if tracking_error > 0 else np.nan
-        
-        # Treynor ratio
-        treynor_ratio = (port_annual - self.risk_free_rate) / beta if beta > 0 else np.nan
-        
-        # Appraisal ratio
-        appraisal_ratio = alpha / tracking_error if tracking_error > 0 else np.nan
-        
-        # Up/Down capture ratios
-        up_market = bench_aligned > 0
-        down_market = bench_aligned < 0
-        
-        up_capture = port_aligned[up_market].mean() / bench_aligned[up_market].mean() if up_market.any() else np.nan
-        down_capture = port_aligned[down_market].mean() / bench_aligned[down_market].mean() if down_market.any() else np.nan
-        
-        metrics.update({
-            'Beta': beta,
-            'Alpha (Jensen)': alpha,
-            'Tracking Error': tracking_error,
-            'Information Ratio': information_ratio,
-            'Treynor Ratio': treynor_ratio,
-            'Appraisal Ratio': appraisal_ratio,
-            'Up Capture Ratio': up_capture,
-            'Down Capture Ratio': down_capture,
-            'Capture Ratio': up_capture / abs(down_capture) if down_capture != 0 else np.inf,
-            'Active Share': np.mean(np.abs(active_returns)) * TRADING_DAYS,
-            'R-squared': np.corrcoef(port_aligned, bench_aligned)[0, 1] ** 2
-        })
-        
-        return metrics
-    
-    def _calculate_ml_metrics(self, returns):
-        """Calculate machine learning based metrics"""
-        metrics = {}
-        
-        # Regime detection metrics
-        try:
-            regimes = self._detect_regimes(returns)
-            if regimes is not None:
-                metrics['Number of Regimes'] = len(np.unique(regimes))
-                metrics['Regime Persistence'] = self._calculate_regime_persistence(regimes)
-        except:
-            pass
-        
-        # Entropy-based metrics
-        metrics['Sample Entropy'] = self._calculate_sample_entropy(returns)
-        metrics['Permutation Entropy'] = self._calculate_permutation_entropy(returns)
-        
-        # Fractal metrics
-        try:
-            hurst_exponent = self._calculate_hurst_exponent(returns)
-            metrics['Hurst Exponent'] = hurst_exponent
-            metrics['Market Efficiency'] = 'Efficient' if abs(hurst_exponent - 0.5) < 0.1 else 'Inefficient'
-        except:
-            metrics['Hurst Exponent'] = np.nan
-        
-        return metrics
-    
-    def _detect_regimes(self, returns, n_regimes=3):
-        """Detect market regimes using Gaussian Mixture Models"""
-        try:
-            # Prepare features
-            features = pd.DataFrame({
-                'returns': returns,
-                'volatility': returns.rolling(20).std(),
-                'skewness': returns.rolling(20).apply(lambda x: stats.skew(x.dropna())),
-            }).dropna()
-            
-            if len(features) < 50:
-                return None
-            
-            # Standardize features
-            scaler = StandardScaler()
-            features_scaled = scaler.fit_transform(features)
-            
-            # Fit GMM
-            gmm = GaussianMixture(n_components=n_regimes, random_state=42)
-            regimes = gmm.fit_predict(features_scaled)
-            
-            # Map back to original index
-            regime_series = pd.Series(regimes, index=features.index)
-            
-            return regime_series
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            return {
+                'market_cap': info.get('marketCap', None),
+                'pe_ratio': info.get('trailingPE', None),
+                'pb_ratio': info.get('priceToBook', None),
+                'dividend_yield': info.get('dividendYield', None),
+                'beta': info.get('beta', None)
+            }
         except:
             return None
-    
-    def _calculate_regime_persistence(self, regimes):
-        """Calculate how persistent regimes are"""
-        if regimes is None:
-            return np.nan
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENHANCED PORTFOLIO OPTIMIZATION ENGINE
+# ─────────────────────────────────────────────────────────────────────────────
+
+class EnhancedPortfolioOptimizer:
+    def __init__(self, prices, returns):
+        self.prices = prices
+        self.returns = returns
         
-        changes = (regimes != regimes.shift(1)).sum()
-        total_periods = len(regimes)
-        
-        return 1 - (changes / total_periods)
-    
-    def _calculate_sample_entropy(self, returns, m=2, r=0.2):
-        """Calculate sample entropy of returns"""
-        try:
-            # Normalize returns
-            series = (returns - returns.mean()) / returns.std()
-            
-            # Calculate sample entropy
-            N = len(series)
-            
-            # Split into templates
-            templates = np.array([series[i:i+m] for i in range(N-m+1)])
-            
-            # Calculate distances
-            dist = np.abs(templates[:, None] - templates)
-            dist = np.max(dist, axis=2)
-            
-            # Count matches
-            matches_m = np.sum(dist <= r) - (N - m + 1)  # Subtract self-matches
-            matches_m1 = np.sum(dist[:, :, None] <= r) - (N - m)  # For m+1
-            
-            # Avoid division by zero
-            if matches_m == 0 or matches_m1 == 0:
-                return 0
-            
-            return -np.log(matches_m1 / matches_m)
-        except:
-            return np.nan
-    
-    def _calculate_permutation_entropy(self, returns, order=3, delay=1):
-        """Calculate permutation entropy"""
-        try:
-            from itertools import permutations
-            
-            # Get all possible permutations
-            permutations_list = list(permutations(range(order)))
-            
-            # Create dictionary for permutations
-            perm_dict = {perm: idx for idx, perm in enumerate(permutations_list)}
-            
-            # Create overlapping vectors
-            vectors = np.array([returns[i:i+order*delay:delay] for i in range(len(returns)-order*delay+1)])
-            
-            # Get permutation patterns
-            patterns = []
-            for vec in vectors:
-                sorted_idx = np.argsort(vec)
-                patterns.append(perm_dict[tuple(sorted_idx)])
-            
-            # Calculate probability distribution
-            hist = np.bincount(patterns, minlength=len(permutations_list))
-            probs = hist / hist.sum()
-            
-            # Calculate entropy
-            entropy = -np.sum([p * np.log2(p) for p in probs if p > 0])
-            
-            # Normalize
-            max_entropy = np.log2(len(permutations_list))
-            
-            return entropy / max_entropy if max_entropy > 0 else 0
-        except:
-            return np.nan
-    
-    def _calculate_hurst_exponent(self, returns, max_lag=50):
-        """Calculate Hurst exponent for long-term memory detection"""
-        try:
-            lags = range(2, max_lag)
-            tau = [np.sqrt(np.std(np.subtract(returns[lag:], returns[:-lag]))) for lag in lags]
-            
-            # Fit to power law
-            poly = np.polyfit(np.log(lags), np.log(tau), 1)
-            
-            return poly[0]  # Hurst exponent
-        except:
-            return np.nan
-    
-    def optimize_portfolio(self, method, mu, S, returns, constraints=None, **kwargs):
-        """Advanced portfolio optimization with multiple methods"""
-        
-        if constraints is None:
-            constraints = {'min_weight': 0, 'max_weight': 1}
-        
-        methods = {
-            'max_sharpe': self._optimize_max_sharpe,
-            'min_volatility': self._optimize_min_volatility,
-            'efficient_risk': self._optimize_efficient_risk,
-            'efficient_return': self._optimize_efficient_return,
-            'max_quadratic_utility': self._optimize_max_quadratic_utility,
-            'hrp': self._optimize_hrp,
-            'cvar': self._optimize_cvar,
-            'equal_weight': self._optimize_equal_weight,
-            'risk_parity': self._optimize_risk_parity,
-            'most_diversified': self._optimize_most_diversified,
-            'minimum_correlation': self._optimize_minimum_correlation,
-            'black_litterman': self._optimize_black_litterman,
-            'resampling': self._optimize_resampling,
-            'bayesian': self._optimize_bayesian,
+        # Multiple expected return models
+        self.mu_models = {
+            'mean_historical': expected_returns.mean_historical_return(prices),
+            'ema_historical': expected_returns.ema_historical_return(prices),
+            'capm_return': expected_returns.capm_return(prices),
         }
         
-        if method not in methods:
+        # Multiple risk models
+        self.risk_models = {
+            'sample_cov': risk_models.sample_cov(returns),
+            'semicovariance': risk_models.semicovariance(returns),
+            'exp_cov': risk_models.exp_cov(returns),
+            'ledoit_wolf': risk_models.CovarianceShrinkage(prices).ledoit_wolf(),
+            'oracle_approximating': risk_models.CovarianceShrinkage(prices).oracle_approximating(),
+        }
+        
+    def optimize_portfolio(self, method='max_sharpe', risk_model='ledoit_wolf', 
+                          return_model='mean_historical', **kwargs):
+        """Comprehensive portfolio optimization with multiple methods"""
+        
+        mu = self.mu_models.get(return_model, self.mu_models['mean_historical'])
+        S = self.risk_models.get(risk_model, self.risk_models['ledoit_wolf'])
+        
+        if method == 'max_sharpe':
+            ef = EfficientFrontier(mu, S)
+            ef.max_sharpe()
+            weights = ef.clean_weights()
+            
+        elif method == 'min_volatility':
+            ef = EfficientFrontier(mu, S)
+            ef.min_volatility()
+            weights = ef.clean_weights()
+            
+        elif method == 'max_quadratic_utility':
+            ef = EfficientFrontier(mu, S)
+            ef.max_quadratic_utility()
+            weights = ef.clean_weights()
+            
+        elif method == 'efficient_risk':
+            ef = EfficientFrontier(mu, S)
+            target_vol = kwargs.get('target_volatility', 0.15)
+            ef.efficient_risk(target_volatility=target_vol)
+            weights = ef.clean_weights()
+            
+        elif method == 'efficient_return':
+            ef = EfficientFrontier(mu, S)
+            target_return = kwargs.get('target_return', 0.20)
+            ef.efficient_return(target_return=target_return)
+            weights = ef.clean_weights()
+            
+        elif method == 'hrp':
+            hrp = HRPOpt(self.returns)
+            hrp.optimize()
+            weights = hrp.clean_weights()
+            
+        elif method == 'cvar':
+            ec = EfficientCVaR(mu, self.returns)
+            ec.min_cvar()
+            weights = ec.clean_weights()
+            
+        elif method == 'semivariance':
+            es = EfficientSemivariance(mu, self.returns)
+            es.efficient_return(target_return=kwargs.get('target_return', 0.15))
+            weights = es.clean_weights()
+            
+        else:
             raise ValueError(f"Unknown optimization method: {method}")
         
-        return methods[method](mu, S, returns, constraints, **kwargs)
+        # Calculate performance metrics
+        if method in ['hrp', 'cvar', 'semivariance']:
+            # For special optimizers, calculate manually
+            port_returns = (self.returns * pd.Series(weights)).sum(axis=1)
+            annual_return = (1 + port_returns.mean()) ** 252 - 1
+            annual_vol = port_returns.std() * np.sqrt(252)
+            sharpe = (annual_return - kwargs.get('risk_free_rate', 0.0)) / annual_vol if annual_vol > 0 else 0
+            performance = (annual_return, annual_vol, sharpe)
+        else:
+            performance = ef.portfolio_performance(verbose=False)
+        
+        return weights, performance
     
-    def _optimize_max_sharpe(self, mu, S, returns, constraints, **kwargs):
-        """Maximize Sharpe ratio"""
+    def generate_efficient_frontier(self, points=100):
+        """Generate efficient frontier points"""
+        mu = self.mu_models['mean_historical']
+        S = self.risk_models['ledoit_wolf']
+        
         ef = EfficientFrontier(mu, S)
-        ef.add_constraint(lambda w: w >= constraints['min_weight'])
-        ef.add_constraint(lambda w: w <= constraints['max_weight'])
-        ef.max_sharpe(risk_free_rate=self.daily_rf)
-        weights = ef.clean_weights()
-        return weights
+        
+        # Generate frontier
+        mus, sigmas, weights = ef.efficient_frontier(points=points)
+        
+        return mus, sigmas, weights
     
-    def _optimize_min_volatility(self, mu, S, returns, constraints, **kwargs):
-        """Minimize portfolio volatility"""
-        ef = EfficientFrontier(mu, S)
-        ef.add_constraint(lambda w: w >= constraints['min_weight'])
-        ef.add_constraint(lambda w: w <= constraints['max_weight'])
-        ef.min_volatility()
-        weights = ef.clean_weights()
-        return weights
-    
-    def _optimize_efficient_risk(self, mu, S, returns, constraints, **kwargs):
-        """Efficient portfolio for target risk"""
-        target_vol = kwargs.get('target_volatility', 0.2)
-        ef = EfficientFrontier(mu, S)
-        ef.add_constraint(lambda w: w >= constraints['min_weight'])
-        ef.add_constraint(lambda w: w <= constraints['max_weight'])
-        ef.efficient_risk(target_volatility=target_vol/np.sqrt(TRADING_DAYS))
-        weights = ef.clean_weights()
-        return weights
-    
-    def _optimize_efficient_return(self, mu, S, returns, constraints, **kwargs):
-        """Efficient portfolio for target return"""
-        target_return = kwargs.get('target_return', 0.15)
-        ef = EfficientFrontier(mu, S)
-        ef.add_constraint(lambda w: w >= constraints['min_weight'])
-        ef.add_constraint(lambda w: w <= constraints['max_weight'])
-        ef.efficient_return(target_return=target_return/TRADING_DAYS)
-        weights = ef.clean_weights()
-        return weights
-    
-    def _optimize_max_quadratic_utility(self, mu, S, returns, constraints, **kwargs):
-        """Maximize quadratic utility"""
-        risk_aversion = kwargs.get('risk_aversion', 1.0)
-        ef = EfficientFrontier(mu, S)
-        ef.add_constraint(lambda w: w >= constraints['min_weight'])
-        ef.add_constraint(lambda w: w <= constraints['max_weight'])
-        ef.max_quadratic_utility(risk_aversion=risk_aversion)
-        weights = ef.clean_weights()
-        return weights
-    
-    def _optimize_hrp(self, mu, S, returns, constraints, **kwargs):
-        """Hierarchical Risk Parity"""
-        hrp = HRPOpt(returns)
-        hrp.optimize()
-        weights = hrp.clean_weights()
-        return weights
-    
-    def _optimize_cvar(self, mu, S, returns, constraints, **kwargs):
-        """Minimize Conditional Value at Risk"""
-        cvar = EfficientCVaR(mu, returns)
-        cvar.add_constraint(lambda w: w >= constraints['min_weight'])
-        cvar.add_constraint(lambda w: w <= constraints['max_weight'])
-        cvar.min_cvar()
-        weights = cvar.clean_weights()
-        return weights
-    
-    def _optimize_equal_weight(self, mu, S, returns, constraints, **kwargs):
-        """Equal weight portfolio"""
-        n_assets = len(returns.columns)
-        weights = {ticker: 1/n_assets for ticker in returns.columns}
-        return weights
-    
-    def _optimize_risk_parity(self, mu, S, returns, constraints, **kwargs):
-        """Risk parity portfolio"""
-        n = len(returns.columns)
-        
-        def risk_parity_objective(w):
-            portfolio_vol = np.sqrt(w @ S @ w.T)
-            marginal_risk = (S @ w.T) / portfolio_vol
-            risk_contributions = w * marginal_risk
-            target_rc = portfolio_vol / n
-            return np.sum((risk_contributions - target_rc) ** 2)
-        
-        bounds = [(constraints['min_weight'], constraints['max_weight']) for _ in range(n)]
-        constraints_opt = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1}]
-        
-        initial_weights = np.ones(n) / n
-        
-        result = minimize(
-            risk_parity_objective,
-            initial_weights,
-            bounds=bounds,
-            constraints=constraints_opt,
-            method='SLSQP'
-        )
-        
-        weights = {ticker: result.x[i] for i, ticker in enumerate(returns.columns)}
-        return weights
-    
-    def _optimize_most_diversified(self, mu, S, returns, constraints, **kwargs):
-        """Most Diversified Portfolio (MDP)"""
-        # MDP maximizes diversification ratio
-        volatilities = np.sqrt(np.diag(S))
-        
-        def diversification_ratio(w):
-            portfolio_vol = np.sqrt(w @ S @ w.T)
-            weighted_vol = np.sum(w * volatilities)
-            return weighted_vol / portfolio_vol if portfolio_vol > 0 else 0
-        
-        n = len(returns.columns)
-        bounds = [(constraints['min_weight'], constraints['max_weight']) for _ in range(n)]
-        constraints_opt = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1}]
-        
-        initial_weights = np.ones(n) / n
-        
-        result = minimize(
-            lambda w: -diversification_ratio(w),  # Maximize diversification
-            initial_weights,
-            bounds=bounds,
-            constraints=constraints_opt,
-            method='SLSQP'
-        )
-        
-        weights = {ticker: result.x[i] for i, ticker in enumerate(returns.columns)}
-        return weights
-    
-    def _optimize_minimum_correlation(self, mu, S, returns, constraints, **kwargs):
-        """Minimum Correlation Portfolio"""
-        # Use correlation matrix instead of covariance
-        volatilities = np.sqrt(np.diag(S))
-        correlation = np.corrcoef(returns.T)
-        
-        def correlation_objective(w):
-            w_vol = w * volatilities
-            portfolio_correlation = w_vol @ correlation @ w_vol.T
-            return portfolio_correlation
-        
-        n = len(returns.columns)
-        bounds = [(constraints['min_weight'], constraints['max_weight']) for _ in range(n)]
-        constraints_opt = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1}]
-        
-        initial_weights = np.ones(n) / n
-        
-        result = minimize(
-            correlation_objective,
-            initial_weights,
-            bounds=bounds,
-            constraints=constraints_opt,
-            method='SLSQP'
-        )
-        
-        weights = {ticker: result.x[i] for i, ticker in enumerate(returns.columns)}
-        return weights
-    
-    def _optimize_black_litterman(self, mu, S, returns, constraints, **kwargs):
-        """Black-Litterman model with views"""
-        # This is a simplified implementation
-        # In practice, you would incorporate investor views
-        
-        # Use equilibrium returns (CAPM implied)
-        market_weights = np.ones(len(mu)) / len(mu)
-        market_return = mu @ market_weights
-        equilibrium_returns = self.risk_free_rate/TRADING_DAYS + (market_return - self.risk_free_rate/TRADING_DAYS) * 1
-        
-        # Blend with historical returns
-        tau = 0.05  # Uncertainty scaling
-        blended_returns = (equilibrium_returns + tau * mu) / (1 + tau)
-        
-        # Optimize with blended returns
-        ef = EfficientFrontier(blended_returns, S)
-        ef.add_constraint(lambda w: w >= constraints['min_weight'])
-        ef.add_constraint(lambda w: w <= constraints['max_weight'])
-        ef.max_sharpe(risk_free_rate=self.daily_rf)
-        weights = ef.clean_weights()
-        
-        return weights
-    
-    def _optimize_resampling(self, mu, S, returns, constraints, **kwargs):
-        """Resampled efficiency (Michaud)"""
-        n_simulations = kwargs.get('n_simulations', 100)
-        n = len(returns.columns)
-        
-        all_weights = []
-        
-        for _ in range(n_simulations):
-            # Resample returns with bootstrap
-            resampled_returns = returns.sample(n=len(returns), replace=True)
-            
-            # Calculate new mu and S
-            mu_resampled = resampled_returns.mean()
-            S_resampled = resampled_returns.cov()
-            
-            # Optimize on resampled data
-            ef = EfficientFrontier(mu_resampled, S_resampled)
-            ef.add_constraint(lambda w: w >= constraints['min_weight'])
-            ef.add_constraint(lambda w: w <= constraints['max_weight'])
-            ef.max_sharpe(risk_free_rate=self.daily_rf)
-            weights_resampled = ef.clean_weights()
-            
-            all_weights.append(list(weights_resampled.values()))
-        
-        # Average weights across simulations
-        avg_weights = np.mean(all_weights, axis=0)
-        weights = {ticker: avg_weights[i] for i, ticker in enumerate(returns.columns)}
-        
-        return weights
-    
-    def _optimize_bayesian(self, mu, S, returns, constraints, **kwargs):
-        """Bayesian portfolio optimization"""
-        # Simplified Bayesian approach using shrinkage
-        
-        # Calculate shrinkage target (constant correlation matrix)
-        n = len(returns.columns)
-        avg_correlation = (S.values / np.outer(np.sqrt(np.diag(S)), np.sqrt(np.diag(S)))).mean()
-        
-        # Create shrinkage target
-        F = avg_correlation * np.outer(np.sqrt(np.diag(S)), np.sqrt(np.diag(S)))
-        np.fill_diagonal(F, np.diag(S))
-        
-        # Shrinkage intensity (Ledoit-Wolf style)
-        shrinkage = 0.5  # Can be estimated more rigorously
-        
-        # Shrink covariance matrix
-        S_shrunk = shrinkage * F + (1 - shrinkage) * S
-        
-        # Optimize with shrunk covariance
-        ef = EfficientFrontier(mu, S_shrunk)
-        ef.add_constraint(lambda w: w >= constraints['min_weight'])
-        ef.add_constraint(lambda w: w <= constraints['max_weight'])
-        ef.max_sharpe(risk_free_rate=self.daily_rf)
-        weights = ef.clean_weights()
-        
-        return weights
+    def calculate_discrete_allocation(self, weights, total_portfolio_value=100000):
+        """Calculate discrete allocation with latest prices"""
+        latest_prices = get_latest_prices(self.prices)
+        da = DiscreteAllocation(weights, latest_prices, total_portfolio_value=total_portfolio_value)
+        allocation, leftover = da.lp_portfolio()
+        return allocation, leftover
 
-# ============================================================================
-# 5. ADVANCED VISUALIZATION ENGINE
-# ============================================================================
+# ─────────────────────────────────────────────────────────────────────────────
+# ADVANCED ANALYTICS WITH QUANTSTATS
+# ─────────────────────────────────────────────────────────────────────────────
 
-class PortfolioVisualizer:
-    """Professional visualization engine for portfolio analytics"""
-    
-    @staticmethod
-    def create_performance_dashboard(portfolio_returns, benchmark_returns=None, metrics=None):
-        """Create comprehensive performance dashboard"""
+class QuantStatsAnalytics:
+    def __init__(self, portfolio_returns, benchmark_returns=None, risk_free_rate=0.0):
+        self.portfolio_returns = portfolio_returns
+        self.benchmark_returns = benchmark_returns
+        self.risk_free_rate = risk_free_rate
         
-        # Create subplots with professional layout
+        # Ensure series format for QuantStats
+        if isinstance(self.portfolio_returns, pd.DataFrame):
+            self.portfolio_returns = self.portfolio_returns.iloc[:, 0]
+    
+    def generate_full_report(self, mode='basic'):
+        """Generate comprehensive QuantStats report"""
+        if not HAS_QUANTSTATS:
+            return None
+        
+        try:
+            # Create HTML report
+            if self.benchmark_returns is not None:
+                # Full comparative report
+                if mode == 'full':
+                    html = qs.reports.html(
+                        self.portfolio_returns,
+                        self.benchmark_returns,
+                        rf=self.risk_free_rate,
+                        title='BIST Portfolio Analysis',
+                        output=None
+                    )
+                else:
+                    # Basic metrics report
+                    html = qs.reports.metrics(
+                        self.portfolio_returns,
+                        self.benchmark_returns,
+                        rf=self.risk_free_rate,
+                        display=False,
+                        mode='full'
+                    )
+            else:
+                html = qs.reports.html(
+                    self.portfolio_returns,
+                    rf=self.risk_free_rate,
+                    title='Portfolio Analysis',
+                    output=None
+                )
+            
+            return html
+            
+        except Exception as e:
+            st.error(f"QuantStats report error: {str(e)}")
+            return None
+    
+    def calculate_advanced_metrics(self):
+        """Calculate comprehensive performance metrics"""
+        metrics = {}
+        
+        if HAS_QUANTSTATS:
+            # Use QuantStats for advanced metrics
+            metrics.update(qs.reports.metrics(
+                self.portfolio_returns,
+                self.benchmark_returns if self.benchmark_returns is not None else self.portfolio_returns,
+                rf=self.risk_free_rate,
+                display=False
+            ))
+        
+        # Additional custom metrics
+        if self.benchmark_returns is not None:
+            # Calculate tracking error
+            tracking_error = (self.portfolio_returns - self.benchmark_returns).std() * np.sqrt(252)
+            metrics['Tracking Error'] = tracking_error
+            
+            # Information Ratio
+            excess_return = (self.portfolio_returns - self.benchmark_returns).mean() * 252
+            metrics['Information Ratio'] = excess_return / tracking_error if tracking_error > 0 else 0
+            
+            # Beta calculation
+            covariance = np.cov(self.portfolio_returns, self.benchmark_returns)[0, 1]
+            benchmark_variance = np.var(self.benchmark_returns)
+            metrics['Beta'] = covariance / benchmark_variance if benchmark_variance > 0 else 0
+        
+        return metrics
+    
+    def generate_tearsheet(self):
+        """Generate professional tearsheet"""
+        if not HAS_QUANTSTATS:
+            return None
+        
         fig = make_subplots(
-            rows=4, cols=3,
-            subplot_titles=(
-                'Cumulative Performance',
-                'Rolling Sharpe Ratio (6M)',
-                'Drawdown Analysis',
-                'Return Distribution',
-                'QQ Plot vs Normal',
-                'Rolling Volatility (1M)',
-                'Active Returns vs Benchmark',
-                'Autocorrelation Analysis',
-                'VaR Breach Analysis',
-                'Return Heatmap (Monthly)',
-                'Risk Contribution',
-                'Performance Attribution'
-            ),
-            specs=[
-                [{"type": "scatter"}, {"type": "scatter"}, {"type": "scatter"}],
-                [{"type": "histogram"}, {"type": "scatter"}, {"type": "scatter"}],
-                [{"type": "scatter"}, {"type": "bar"}, {"type": "scatter"}],
-                [{"type": "heatmap"}, {"type": "bar"}, {"type": "bar"}]
-            ],
-            vertical_spacing=0.08,
-            horizontal_spacing=0.1,
-            row_heights=[0.25, 0.25, 0.25, 0.25]
+            rows=3, cols=2,
+            subplot_titles=('Cumulative Returns', 'Daily Returns',
+                          'Rolling Sharpe (6M)', 'Drawdown',
+                          'Monthly Returns Heatmap', 'Return Distribution'),
+            vertical_spacing=0.1,
+            horizontal_spacing=0.1
         )
         
-        # 1. Cumulative Performance
-        cum_returns = np.exp(portfolio_returns.cumsum())
-        
+        # 1. Cumulative Returns
+        cum_returns = (1 + self.portfolio_returns).cumprod()
         fig.add_trace(
-            go.Scatter(
-                x=cum_returns.index,
-                y=cum_returns.values,
-                mode='lines',
-                name='Portfolio',
-                line=dict(color='#3B82F6', width=3),
-                fill='tozeroy',
-                fillcolor='rgba(59, 130, 246, 0.1)'
-            ),
+            go.Scatter(x=cum_returns.index, y=cum_returns.values, 
+                      name='Portfolio', line=dict(color='blue')),
             row=1, col=1
         )
         
-        if benchmark_returns is not None:
-            bench_cum = np.exp(benchmark_returns.cumsum())
+        if self.benchmark_returns is not None:
+            bench_cum = (1 + self.benchmark_returns).cumprod()
             fig.add_trace(
-                go.Scatter(
-                    x=bench_cum.index,
-                    y=bench_cum.values,
-                    mode='lines',
-                    name='Benchmark',
-                    line=dict(color='#6B7280', width=2, dash='dash')
-                ),
+                go.Scatter(x=bench_cum.index, y=bench_cum.values,
+                          name='Benchmark', line=dict(color='red', dash='dash')),
                 row=1, col=1
             )
         
-        # 2. Rolling Sharpe Ratio
-        rolling_window = 126  # 6 months
-        if len(portfolio_returns) > rolling_window:
-            rolling_sharpe = portfolio_returns.rolling(rolling_window).apply(
-                lambda x: (x.mean() * 252 - 0.45) / (x.std() * np.sqrt(252)) if x.std() > 0 else 0
-            )
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=rolling_sharpe.index,
-                    y=rolling_sharpe.values,
-                    mode='lines',
-                    name='Rolling Sharpe',
-                    line=dict(color='#10B981', width=2),
-                    fill='tozeroy',
-                    fillcolor='rgba(16, 185, 129, 0.1)'
-                ),
-                row=1, col=2
-            )
-        
-        # 3. Drawdown Analysis
-        drawdown = PortfolioVisualizer._calculate_drawdown(portfolio_returns)
-        
+        # 2. Daily Returns
         fig.add_trace(
-            go.Scatter(
-                x=drawdown.index,
-                y=drawdown.values * 100,
-                mode='lines',
-                name='Drawdown',
-                line=dict(color='#EF4444', width=2),
-                fill='tozeroy',
-                fillcolor='rgba(239, 68, 68, 0.1)'
-            ),
-            row=1, col=3
-        )
-        
-        # 4. Return Distribution
-        fig.add_trace(
-            go.Histogram(
-                x=portfolio_returns * 100,
-                nbinsx=50,
-                name='Returns',
-                marker_color='#3B82F6',
-                opacity=0.7,
-                histnorm='probability density'
-            ),
-            row=2, col=1
-        )
-        
-        # Add normal distribution overlay
-        x_norm = np.linspace(portfolio_returns.min() * 100, portfolio_returns.max() * 100, 100)
-        y_norm = norm.pdf(x_norm, portfolio_returns.mean() * 100, portfolio_returns.std() * 100)
-        
-        fig.add_trace(
-            go.Scatter(
-                x=x_norm,
-                y=y_norm,
-                name='Normal Distribution',
-                line=dict(color='#EF4444', width=2, dash='dash')
-            ),
-            row=2, col=1
-        )
-        
-        # 5. QQ Plot
-        if len(portfolio_returns) > 10:
-            qq_data = sm.qqplot(portfolio_returns, dist=stats.norm, fit=True, line='45')
-            qq_fig = go.Figure()
-            
-            # Extract data from QQ plot
-            import matplotlib.pyplot as plt
-            from io import BytesIO
-            import base64
-            
-            # Create QQ plot using matplotlib
-            plt.figure(figsize=(6, 6))
-            sm.qqplot(portfolio_returns, line='45', fit=True)
-            plt.title('QQ Plot')
-            
-            # Convert matplotlib figure to plotly
-            buf = BytesIO()
-            plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-            plt.close()
-            
-            # Instead of trying to convert, create a simple QQ plot
-            # Calculate theoretical quantiles
-            sorted_returns = np.sort(portfolio_returns)
-            theoretical_quantiles = norm.ppf(np.linspace(0.01, 0.99, len(sorted_returns)))
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=theoretical_quantiles,
-                    y=sorted_returns,
-                    mode='markers',
-                    name='QQ Points',
-                    marker=dict(size=4, color='#3B82F6')
-                ),
-                row=2, col=2
-            )
-            
-            # Add 45-degree line
-            line_range = [min(theoretical_quantiles.min(), sorted_returns.min()),
-                         max(theoretical_quantiles.max(), sorted_returns.max())]
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=line_range,
-                    y=line_range,
-                    mode='lines',
-                    name='45° Line',
-                    line=dict(color='#EF4444', width=2, dash='dash')
-                ),
-                row=2, col=2
-            )
-        
-        # 6. Rolling Volatility
-        rolling_vol = portfolio_returns.rolling(21).std() * np.sqrt(252) * 100
-        
-        fig.add_trace(
-            go.Scatter(
-                x=rolling_vol.index,
-                y=rolling_vol.values,
-                mode='lines',
-                name='Volatility',
-                line=dict(color='#F59E0B', width=2)
-            ),
-            row=2, col=3
-        )
-        
-        # 7. Active Returns (if benchmark)
-        if benchmark_returns is not None:
-            active_returns = portfolio_returns - benchmark_returns
-            
-            fig.add_trace(
-                go.Bar(
-                    x=active_returns.resample('M').sum().index,
-                    y=active_returns.resample('M').sum().values * 100,
-                    name='Active Return',
-                    marker_color='#8B5CF6'
-                ),
-                row=3, col=1
-            )
-        
-        # 8. Autocorrelation Analysis
-        max_lag = min(40, len(portfolio_returns) // 2)
-        if max_lag > 5:
-            # ACF of returns
-            acf_returns = [portfolio_returns.autocorr(lag=i) for i in range(1, max_lag + 1)]
-            
-            fig.add_trace(
-                go.Bar(
-                    x=list(range(1, max_lag + 1)),
-                    y=acf_returns,
-                    name='ACF Returns',
-                    marker_color='#3B82F6',
-                    opacity=0.7
-                ),
-                row=3, col=2
-            )
-            
-            # PACF of returns
-            pacf_returns = pacf(portfolio_returns, nlags=max_lag)[1:]
-            
-            fig.add_trace(
-                go.Bar(
-                    x=list(range(1, max_lag + 1)),
-                    y=pacf_returns,
-                    name='PACF Returns',
-                    marker_color='#EF4444',
-                    opacity=0.7
-                ),
-                row=3, col=2
-            )
-        
-        # 9. VaR Breach Analysis
-        var_level = 0.95
-        var_threshold = np.percentile(portfolio_returns, (1 - var_level) * 100)
-        breaches = portfolio_returns < var_threshold
-        
-        fig.add_trace(
-            go.Scatter(
-                x=portfolio_returns.index,
-                y=portfolio_returns.values * 100,
-                mode='markers',
-                name='Returns',
-                marker=dict(
-                    size=6,
-                    color=['#EF4444' if b else '#3B82F6' for b in breaches],
-                    opacity=0.7
-                )
-            ),
-            row=3, col=3
-        )
-        
-        fig.add_trace(
-            go.Scatter(
-                x=[portfolio_returns.index[0], portfolio_returns.index[-1]],
-                y=[var_threshold * 100, var_threshold * 100],
-                mode='lines',
-                name=f'VaR ({var_level*100:.0f}%)',
-                line=dict(color='#EF4444', width=2, dash='dash')
-            ),
-            row=3, col=3
-        )
-        
-        # 10. Monthly Return Heatmap
-        monthly_returns = portfolio_returns.resample('M').apply(lambda x: np.exp(x.sum()) - 1)
-        monthly_matrix = monthly_returns.unstack() if hasattr(monthly_returns, 'unstack') else monthly_returns
-        
-        if isinstance(monthly_matrix, pd.Series):
-            # Convert to 2D matrix for heatmap
-            monthly_matrix = monthly_returns.to_frame().T
-        
-        fig.add_trace(
-            go.Heatmap(
-                z=monthly_matrix.values * 100,
-                x=monthly_matrix.columns,
-                y=monthly_matrix.index,
-                colorscale='RdYlGn',
-                zmid=0,
-                colorbar=dict(title="Return %")
-            ),
-            row=4, col=1
-        )
-        
-        # 11. Risk Contribution (placeholder - would need weights)
-        # This would be populated with actual risk contribution data
-        
-        # 12. Performance Attribution (placeholder)
-        # This would show factor contributions
-        
-        # Update layout
-        fig.update_layout(
-            height=1400,
-            showlegend=True,
-            template='plotly_white',
-            plot_bgcolor='white',
-            paper_bgcolor='white',
-            font=dict(family="Arial, sans-serif", size=12),
-            margin=dict(l=50, r=50, t=50, b=50)
-        )
-        
-        # Update axes
-        fig.update_yaxes(title_text="Cumulative Return", row=1, col=1)
-        fig.update_yaxes(title_text="Sharpe Ratio", row=1, col=2)
-        fig.update_yaxes(title_text="Drawdown (%)", row=1, col=3)
-        fig.update_yaxes(title_text="Density", row=2, col=1)
-        fig.update_xaxes(title_text="Return (%)", row=2, col=1)
-        fig.update_yaxes(title_text="Sample Quantiles", row=2, col=2)
-        fig.update_xaxes(title_text="Theoretical Quantiles", row=2, col=2)
-        fig.update_yaxes(title_text="Volatility (%)", row=2, col=3)
-        fig.update_yaxes(title_text="Active Return (%)", row=3, col=1)
-        fig.update_xaxes(title_text="Month", row=3, col=1)
-        fig.update_yaxes(title_text="Autocorrelation", row=3, col=2)
-        fig.update_xaxes(title_text="Lag", row=3, col=2)
-        fig.update_yaxes(title_text="Return (%)", row=3, col=3)
-        fig.update_xaxes(title_text="Month", row=4, col=1)
-        fig.update_yaxes(title_text="Year", row=4, col=1)
-        
-        return fig
-    
-    @staticmethod
-    def _calculate_drawdown(returns):
-        """Calculate drawdown series"""
-        cumulative = np.exp(returns.cumsum())
-        running_max = cumulative.cummax()
-        drawdown = (cumulative - running_max) / running_max
-        return drawdown
-    
-    @staticmethod
-    def create_risk_decomposition_chart(weights, covariance_matrix, returns):
-        """Create risk decomposition visualization"""
-        
-        # Calculate risk contributions
-        portfolio_vol = np.sqrt(weights @ covariance_matrix @ weights)
-        marginal_risk = (covariance_matrix @ weights) / portfolio_vol
-        risk_contributions = weights * marginal_risk
-        
-        # Convert to percentages
-        risk_pct = risk_contributions / portfolio_vol
-        
-        # Create DataFrame
-        risk_df = pd.DataFrame({
-            'Asset': returns.columns,
-            'Weight': weights,
-            'Risk Contribution': risk_pct * 100,
-            'Marginal Risk': marginal_risk
-        }).sort_values('Risk Contribution', ascending=False)
-        
-        # Create figure
-        fig = make_subplots(
-            rows=2, cols=2,
-            subplot_titles=(
-                'Risk Contribution by Asset',
-                'Weight vs Risk Contribution',
-                'Marginal Risk Analysis',
-                'Risk Concentration'
-            ),
-            specs=[[{"type": "bar"}, {"type": "scatter"}],
-                   [{"type": "bar"}, {"type": "pie"}]]
-        )
-        
-        # 1. Risk Contribution Bar Chart
-        fig.add_trace(
-            go.Bar(
-                x=risk_df['Asset'],
-                y=risk_df['Risk Contribution'],
-                name='Risk Contribution',
-                marker_color='#EF4444'
-            ),
-            row=1, col=1
-        )
-        
-        # 2. Weight vs Risk Contribution
-        fig.add_trace(
-            go.Scatter(
-                x=risk_df['Weight'] * 100,
-                y=risk_df['Risk Contribution'],
-                mode='markers+text',
-                text=risk_df['Asset'],
-                textposition="top center",
-                marker=dict(
-                    size=abs(risk_df['Marginal Risk']) * 50,
-                    color=risk_df['Marginal Risk'],
-                    colorscale='RdYlGn',
-                    showscale=True,
-                    colorbar=dict(title="Marginal Risk")
-                ),
-                name='Weight vs Risk'
-            ),
+            go.Scatter(x=self.portfolio_returns.index, y=self.portfolio_returns.values,
+                      mode='markers', marker=dict(size=3, color=self.portfolio_returns.values,
+                                                 colorscale='RdBu', showscale=False),
+                      name='Daily Returns'),
             row=1, col=2
         )
         
-        # 3. Marginal Risk Analysis
+        # 3. Rolling Sharpe (6M)
+        rolling_sharpe = self.portfolio_returns.rolling(126).apply(
+            lambda x: (x.mean() * 252) / (x.std() * np.sqrt(252)) if x.std() > 0 else 0
+        )
         fig.add_trace(
-            go.Bar(
-                x=risk_df['Asset'],
-                y=risk_df['Marginal Risk'],
-                name='Marginal Risk',
-                marker_color='#3B82F6'
-            ),
+            go.Scatter(x=rolling_sharpe.index, y=rolling_sharpe.values,
+                      name='Rolling Sharpe', line=dict(color='green')),
             row=2, col=1
         )
         
-        # 4. Risk Concentration (Pie chart)
+        # 4. Drawdown
+        drawdown = qs.stats.to_drawdown_series(self.portfolio_returns)
         fig.add_trace(
-            go.Pie(
-                labels=risk_df['Asset'],
-                values=risk_df['Risk Contribution'],
-                hole=0.4,
-                name='Risk Distribution'
-            ),
+            go.Scatter(x=drawdown.index, y=drawdown.values,
+                      fill='tozeroy', fillcolor='rgba(255,0,0,0.3)',
+                      line=dict(color='red'), name='Drawdown'),
             row=2, col=2
         )
         
-        fig.update_layout(
-            height=800,
-            showlegend=True,
-            template='plotly_white',
-            title_text="Portfolio Risk Decomposition Analysis"
+        # 5. Monthly Returns Heatmap
+        monthly_returns = self.portfolio_returns.resample('M').apply(lambda x: (1+x).prod()-1)
+        monthly_df = pd.DataFrame({
+            'Year': monthly_returns.index.year,
+            'Month': monthly_returns.index.month_name(),
+            'Return': monthly_returns.values
+        })
+        
+        # 6. Return Distribution
+        fig.add_trace(
+            go.Histogram(x=self.portfolio_returns.values, nbinsx=50,
+                        name='Return Distribution', marker_color='blue'),
+            row=3, col=2
         )
         
-        return fig, risk_df
-    
-    @staticmethod
-    def create_correlation_network(returns, threshold=0.5):
-        """Create correlation network visualization"""
-        
-        # Calculate correlation matrix
-        corr_matrix = returns.corr()
-        
-        # Create network graph
-        G = nx.Graph()
-        
-        # Add nodes
-        for ticker in returns.columns:
-            G.add_node(ticker, label=BIST30_TICKERS.get(ticker, ticker))
-        
-        # Add edges for significant correlations
-        for i, ticker1 in enumerate(returns.columns):
-            for j, ticker2 in enumerate(returns.columns):
-                if i < j and abs(corr_matrix.iloc[i, j]) > threshold:
-                    G.add_edge(ticker1, ticker2, weight=corr_matrix.iloc[i, j])
-        
-        # Create network visualization
-        pos = nx.spring_layout(G, seed=42)
-        
-        edge_trace = []
-        for edge in G.edges():
-            x0, y0 = pos[edge[0]]
-            x1, y1 = pos[edge[1]]
-            
-            edge_trace.append(
-                go.Scatter(
-                    x=[x0, x1, None],
-                    y=[y0, y1, None],
-                    line=dict(width=1, color='#94A3B8'),
-                    hoverinfo='none',
-                    mode='lines'
-                )
-            )
-        
-        node_trace = go.Scatter(
-            x=[pos[node][0] for node in G.nodes()],
-            y=[pos[node][1] for node in G.nodes()],
-            mode='markers+text',
-            text=[BIST30_TICKERS.get(node, node) for node in G.nodes()],
-            textposition="bottom center",
-            marker=dict(
-                size=20,
-                color='#3B82F6',
-                line=dict(width=2, color='white')
-            ),
-            hoverinfo='text',
-            hovertext=[f"{BIST30_TICKERS.get(node, node)}<br>Connections: {G.degree(node)}" 
-                      for node in G.nodes()]
-        )
-        
-        fig = go.Figure(data=edge_trace + [node_trace])
-        
-        fig.update_layout(
-            title=f"Asset Correlation Network (|ρ| > {threshold})",
-            showlegend=False,
-            hovermode='closest',
-            margin=dict(b=20, l=5, r=5, t=40),
-            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            height=600,
-            template='plotly_white'
-        )
-        
+        fig.update_layout(height=1000, showlegend=True, template='plotly_dark')
         return fig
 
-# ============================================================================
-# 6. REPORT GENERATOR
-# ============================================================================
+# ─────────────────────────────────────────────────────────────────────────────
+# RISK ANALYTICS MODULE
+# ─────────────────────────────────────────────────────────────────────────────
 
-class PortfolioReportGenerator:
-    """Generate professional PDF reports"""
+class RiskAnalytics:
+    def __init__(self, returns, benchmark_returns=None):
+        self.returns = returns
+        self.benchmark_returns = benchmark_returns
+        
+    def calculate_var_cvar(self, confidence_levels=[0.90, 0.95, 0.99]):
+        """Calculate Value at Risk and Conditional VaR at multiple confidence levels"""
+        results = {}
+        
+        for cl in confidence_levels:
+            # Historical VaR/CVaR
+            var_hist = np.percentile(self.returns, (1-cl)*100)
+            cvar_hist = self.returns[self.returns <= var_hist].mean()
+            
+            # Parametric VaR (Normal)
+            var_param = self.returns.mean() + stats.norm.ppf(1-cl) * self.returns.std()
+            
+            # Modified VaR (Cornish-Fisher)
+            z = stats.norm.ppf(1-cl)
+            s = stats.skew(self.returns)
+            k = stats.kurtosis(self.returns)
+            z_cf = z + (z**2 - 1)*s/6 + (z**3 - 3*z)*k/24 - (2*z**3 - 5*z)*s**2/36
+            var_cf = self.returns.mean() + z_cf * self.returns.std()
+            
+            results[f'VaR_{int(cl*100)}'] = {
+                'Historical': var_hist,
+                'Parametric': var_param,
+                'Cornish_Fisher': var_cf,
+                'CVaR_Historical': cvar_hist
+            }
+        
+        return results
     
-    @staticmethod
-    def generate_pdf_report(metrics, weights, portfolio_returns, benchmark_returns, filename="portfolio_report.pdf"):
-        """Generate comprehensive PDF report"""
+    def calculate_risk_decomposition(self, weights, covariance_matrix):
+        """Decompose portfolio risk into marginal contributions"""
+        portfolio_variance = np.dot(weights.T, np.dot(covariance_matrix, weights))
         
-        pdf = FPDF()
-        pdf.add_page()
+        # Marginal contribution to risk
+        marginal_contrib = np.dot(covariance_matrix, weights) / np.sqrt(portfolio_variance)
         
-        # Set font
-        pdf.set_font("Arial", 'B', 16)
+        # Percent contribution
+        percent_contrib = (weights * marginal_contrib) / np.sqrt(portfolio_variance)
         
-        # Title
-        pdf.cell(200, 10, "Portfolio Performance Report", ln=True, align='C')
-        pdf.ln(10)
+        return {
+            'marginal_contribution': marginal_contrib,
+            'percent_contribution': percent_contrib,
+            'portfolio_volatility': np.sqrt(portfolio_variance)
+        }
+    
+    def calculate_garch_volatility(self, p=1, q=1):
+        """Calculate GARCH volatility forecasts"""
+        if not HAS_ARCH:
+            return None
         
-        # Date
-        pdf.set_font("Arial", '', 12)
-        pdf.cell(200, 10, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=True, align='C')
-        pdf.ln(10)
-        
-        # Executive Summary
-        pdf.set_font("Arial", 'B', 14)
-        pdf.cell(200, 10, "Executive Summary", ln=True)
-        pdf.set_font("Arial", '', 12)
-        
-        summary_text = f"""
-        Portfolio Analysis Results:
-        - Annual Return: {metrics.get('Annualized Return', 0):.2%}
-        - Annual Volatility: {metrics.get('Annualized Volatility', 0):.2%}
-        - Sharpe Ratio: {metrics.get('Sharpe Ratio', 0):.3f}
-        - Maximum Drawdown: {metrics.get('Maximum Drawdown', 0):.2%}
-        - Number of Assets: {len(weights)}
-        """
-        
-        pdf.multi_cell(0, 10, summary_text)
-        pdf.ln(10)
-        
-        # Performance Metrics Table
-        pdf.set_font("Arial", 'B', 14)
-        pdf.cell(200, 10, "Performance Metrics", ln=True)
-        pdf.ln(5)
-        
-        # Create metrics table
-        metrics_table = [
-            ["Metric", "Value"],
-            ["Annual Return", f"{metrics.get('Annualized Return', 0):.2%}"],
-            ["Annual Volatility", f"{metrics.get('Annualized Volatility', 0):.2%}"],
-            ["Sharpe Ratio", f"{metrics.get('Sharpe Ratio', 0):.3f}"],
-            ["Sortino Ratio", f"{metrics.get('Sortino Ratio', 0):.3f}"],
-            ["Maximum Drawdown", f"{metrics.get('Maximum Drawdown', 0):.2%}"],
-            ["VaR (95%)", f"{metrics.get('VaR 95% (Historical)', 0):.2%}"],
-            ["CVaR (95%)", f"{metrics.get('CVaR 95%', 0):.2%}"],
-            ["Win Rate", f"{metrics.get('Win Rate', 0):.2%}"],
-            ["Skewness", f"{metrics.get('Skewness', 0):.3f}"],
-            ["Kurtosis", f"{metrics.get('Kurtosis', 0):.3f}"]
-        ]
-        
-        # Add table to PDF
-        col_width = pdf.w / 2.5
-        row_height = pdf.font_size * 1.5
-        
-        for row in metrics_table:
-            pdf.set_font("Arial", 'B' if row[0] == "Metric" else '', 12)
-            pdf.cell(col_width, row_height, row[0], border=1)
-            pdf.cell(col_width, row_height, row[1], border=1)
-            pdf.ln(row_height)
-        
-        pdf.ln(10)
-        
-        # Portfolio Composition
-        pdf.set_font("Arial", 'B', 14)
-        pdf.cell(200, 10, "Portfolio Composition", ln=True)
-        pdf.ln(5)
-        
-        # Sort weights
-        sorted_weights = sorted(weights.items(), key=lambda x: x[1], reverse=True)
-        
-        # Top 10 holdings
-        pdf.set_font("Arial", 'B', 12)
-        pdf.cell(200, 10, "Top 10 Holdings:", ln=True)
-        pdf.set_font("Arial", '', 12)
-        
-        for ticker, weight in sorted_weights[:10]:
-            company_name = BIST30_TICKERS.get(ticker, ticker)
-            pdf.cell(200, 10, f"{company_name}: {weight:.2%}", ln=True)
-        
-        # Save PDF
-        pdf.output(filename)
-        
-        return filename
+        try:
+            am = arch_model(self.returns * 100, vol='Garch', p=p, q=q)
+            res = am.fit(disp='off')
+            forecast = res.forecast(horizon=5)
+            return forecast.variance.iloc[-1].values
+        except:
+            return None
 
-# ============================================================================
-# 7. MAIN STREAMLIT APPLICATION
-# ============================================================================
+# ─────────────────────────────────────────────────────────────────────────────
+# MAIN APPLICATION
+# ─────────────────────────────────────────────────────────────────────────────
 
 def main():
-    """Main Streamlit application"""
-    
-    # Header
-    st.markdown('<div class="main-header">🏦 BIST Institutional Portfolio Analytics Platform</div>', unsafe_allow_html=True)
-    st.markdown("### *Advanced Quantitative Portfolio Management & Risk Analytics for Turkish Equity Markets*")
-    st.markdown("---")
-    
-    # Initialize session state
-    if 'data_loaded' not in st.session_state:
-        st.session_state.data_loaded = False
-    if 'optimizer' not in st.session_state:
-        st.session_state.optimizer = AdvancedPortfolioOptimizer(RISK_FREE_RATE)
-    if 'visualizer' not in st.session_state:
-        st.session_state.visualizer = PortfolioVisualizer()
-    
-    # Sidebar
+    # Sidebar Configuration
     with st.sidebar:
-        st.markdown("## ⚙️ Configuration Panel")
+        st.title("⚙️ Configuration Panel")
         
-        # Data Configuration
-        with st.expander("📅 Data Configuration", expanded=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                start_date = st.date_input(
-                    "Start Date",
-                    datetime.now() - timedelta(days=365*3),
-                    help="Start date for historical data analysis"
-                )
-            with col2:
-                end_date = st.date_input(
-                    "End Date",
-                    datetime.now(),
-                    help="End date for historical data analysis"
-                )
-            
-            data_frequency = st.selectbox(
-                "Data Frequency",
-                ["Daily", "Weekly", "Monthly"],
-                help="Frequency for return calculations"
-            )
-            
-            include_benchmarks = st.checkbox("Include Benchmarks", value=True)
-            include_sector_data = st.checkbox("Include Sector Data", value=True)
-        
-        # Optimization Configuration
-        with st.expander("🎯 Optimization Parameters", expanded=True):
-            # Risk-free rate
-            risk_free_rate = st.slider(
-                "Risk-Free Rate (%)",
-                min_value=0.0,
-                max_value=100.0,
-                value=RISK_FREE_RATE * 100,
-                step=0.5,
-                help="Annual risk-free rate for Turkish market"
-            ) / 100
-            
-            # Update optimizer
-            st.session_state.optimizer.risk_free_rate = risk_free_rate
-            st.session_state.optimizer.daily_rf = np.log(1 + risk_free_rate) / TRADING_DAYS
-            
-            # Optimization method
-            optimization_method = st.selectbox(
-                "Optimization Method",
-                [
-                    'max_sharpe', 'min_volatility', 'efficient_risk',
-                    'efficient_return', 'max_quadratic_utility',
-                    'hrp', 'cvar', 'equal_weight', 'risk_parity',
-                    'most_diversified', 'minimum_correlation',
-                    'black_litterman', 'resampling', 'bayesian'
-                ],
-                format_func=lambda x: x.replace('_', ' ').title(),
-                help="Select portfolio optimization methodology"
-            )
-            
-            # Strategy-specific parameters
-            if optimization_method in ['efficient_risk', 'efficient_return']:
-                target_value = st.slider(
-                    f"Target {'Volatility' if optimization_method == 'efficient_risk' else 'Return'} (%)",
-                    min_value=5.0,
-                    max_value=80.0,
-                    value=30.0 if optimization_method == 'efficient_risk' else 25.0,
-                    step=1.0
-                ) / 100
-            
-            if optimization_method == 'max_quadratic_utility':
-                risk_aversion = st.slider(
-                    "Risk Aversion Coefficient",
-                    min_value=0.1,
-                    max_value=10.0,
-                    value=1.0,
-                    step=0.1
-                )
-            
-            if optimization_method == 'resampling':
-                n_simulations = st.slider(
-                    "Number of Simulations",
-                    min_value=10,
-                    max_value=500,
-                    value=100,
-                    step=10
-                )
-        
-        # Portfolio Constraints
-        with st.expander("⚖️ Portfolio Constraints", expanded=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                min_weight = st.number_input(
-                    "Minimum Weight (%)",
-                    min_value=0.0,
-                    max_value=100.0,
-                    value=0.0,
-                    step=0.5
-                ) / 100
-            with col2:
-                max_weight = st.number_input(
-                    "Maximum Weight (%)",
-                    min_value=0.0,
-                    max_value=100.0,
-                    value=100.0,
-                    step=0.5
-                ) / 100
-            
-            sector_constraints = st.checkbox("Apply Sector Constraints")
-            if sector_constraints:
-                st.info("Sector constraints coming soon...")
-        
-        # Advanced Settings
-        with st.expander("🔧 Advanced Settings", expanded=False):
-            cov_estimator = st.selectbox(
-                "Covariance Estimator",
-                ['sample_cov', 'ledoit_wolf', 'oracle_approximating'],
-                help="Method for estimating covariance matrix"
-            )
-            
-            return_type = st.selectbox(
-                "Return Calculation",
-                ['log_returns', 'simple_returns'],
-                help="Method for calculating returns"
-            )
-            
-            use_shrinkage = st.checkbox("Use Shrinkage Estimation", value=True)
-            enable_ml = st.checkbox("Enable ML Features", value=True)
-        
-        # Action Buttons
-        st.markdown("---")
+        # Date Selection
         col1, col2 = st.columns(2)
         with col1:
-            fetch_button = st.button(
-                "📥 Fetch Market Data",
-                type="primary",
-                use_container_width=True
-            )
+            start_date = st.date_input("Start Date", 
+                                     datetime.now() - timedelta(days=365*3))
         with col2:
-            analyze_button = st.button(
-                "🚀 Run Analysis",
-                type="secondary",
-                use_container_width=True,
-                disabled=not st.session_state.data_loaded
-            )
+            end_date = st.date_input("End Date", datetime.now())
         
-        # Additional actions
-        st.markdown("---")
-        if st.button("🔄 Reset Analysis", use_container_width=True):
-            st.session_state.data_loaded = False
-            st.rerun()
+        # Asset Selection with Sectors
+        st.subheader("Asset Selection")
+        selected_sector = st.selectbox("Filter by Sector", 
+                                      ["All"] + list(SECTOR_MAPPING.keys()))
+        
+        if selected_sector == "All":
+            available_tickers = BIST30_TICKERS
+        else:
+            available_tickers = SECTOR_MAPPING[selected_sector]
+        
+        assets = st.multiselect("Select Assets", 
+                               available_tickers,
+                               default=['THYAO.IS', 'GARAN.IS', 'ASELS.IS'])
+        
+        # Benchmark Selection
+        benchmark_symbol = st.selectbox("Benchmark", list(BENCHMARKS.keys()))
+        
+        # Optimization Parameters
+        st.subheader("Optimization Parameters")
+        optimization_method = st.selectbox(
+            "Optimization Method",
+            ['max_sharpe', 'min_volatility', 'efficient_risk', 
+             'efficient_return', 'hrp', 'cvar', 'semivariance']
+        )
+        
+        risk_model = st.selectbox(
+            "Risk Model",
+            ['ledoit_wolf', 'sample_cov', 'semicovariance', 'exp_cov', 'oracle_approximating']
+        )
+        
+        return_model = st.selectbox(
+            "Return Model",
+            ['mean_historical', 'ema_historical', 'capm_return']
+        )
+        
+        # Advanced Parameters
+        with st.expander("Advanced Parameters"):
+            risk_free_rate = st.number_input("Risk Free Rate (%)", 0.0, 50.0, 30.0) / 100
+            target_volatility = st.slider("Target Volatility", 0.05, 0.50, 0.15, 0.01)
+            target_return = st.slider("Target Return", 0.05, 1.0, 0.20, 0.01)
+        
+        # Reporting Options
+        st.subheader("Reporting")
+        generate_full_report = st.checkbox("Generate Full QuantStats Report", True)
+        show_tearsheet = st.checkbox("Show Interactive Tearsheet", True)
+        calculate_discrete = st.checkbox("Calculate Discrete Allocation", False)
+        
+        if calculate_discrete:
+            portfolio_value = st.number_input("Portfolio Value (TRY)", 
+                                            10000, 10000000, 1000000, 10000)
     
-    # Main content area
-    if fetch_button:
-        with st.spinner("🌐 Fetching market data from Yahoo Finance..."):
-            try:
-                # Initialize data fetcher
-                data_fetcher = MarketDataFetcher()
-                
-                # Fetch all data
-                market_data = data_fetcher.fetch_all_data(
-                    start_date=str(start_date),
-                    end_date=str(end_date),
-                    use_cache=True
-                )
-                
-                if market_data['prices'] is None or market_data['prices'].empty:
-                    st.error("❌ Failed to fetch data. Please check your internet connection and try again.")
-                else:
-                    st.session_state.market_data = market_data
-                    st.session_state.data_loaded = True
-                    
-                    # Display success message
-                    st.success(f"✅ Successfully fetched data for {len(market_data['prices'].columns)} assets")
-                    
-                    # Display data summary
-                    with st.expander("📊 Data Summary", expanded=True):
-                        col1, col2, col3 = st.columns(3)
-                        
-                        with col1:
-                            st.metric(
-                                "Assets",
-                                len(market_data['prices'].columns),
-                                f"From {market_data['prices'].index[0].date()}"
-                            )
-                        
-                        with col2:
-                            st.metric(
-                                "Trading Days",
-                                len(market_data['prices']),
-                                f"To {market_data['prices'].index[-1].date()}"
-                            )
-                        
-                        with col3:
-                            missing_pct = market_data['prices'].isnull().sum().sum() / (market_data['prices'].shape[0] * market_data['prices'].shape[1]) * 100
-                            st.metric(
-                                "Data Quality",
-                                f"{100 - missing_pct:.1f}%",
-                                "Complete"
-                            )
-                    
-                    # Show sample of data
-                    st.dataframe(
-                        market_data['prices'].iloc[-10:].style.format("{:.2f}"),
-                        use_container_width=True,
-                        height=400
-                    )
-                    
-            except Exception as e:
-                st.error(f"❌ Error fetching data: {str(e)}")
-                st.exception(e)
+    # Main Dashboard
+    st.title("📊 BIST Enterprise Portfolio Analytics Suite")
+    st.caption("Professional Portfolio Optimization & Risk Analytics Platform")
     
-    # Analysis section
-    if analyze_button and st.session_state.data_loaded:
-        # Get market data from session state
-        market_data = st.session_state.market_data
+    if len(assets) < 2:
+        st.warning("⚠️ Please select at least 2 assets for portfolio optimization.")
+        return
+    
+    # Data Loading
+    with st.spinner("🔄 Loading market data..."):
+        data_source = EnhancedDataSource()
+        data = data_source.fetch_enhanced_data(assets, start_date, end_date)
+        benchmark_data = data_source.fetch_enhanced_data(
+            [BENCHMARKS[benchmark_symbol]], start_date, end_date
+        )
         
-        # Extract data
-        prices = market_data['prices']
-        returns = market_data['returns']
-        benchmark_prices = market_data['benchmark_prices']
-        benchmark_returns = market_data['benchmark_returns']
+        if data is None or benchmark_data is None:
+            st.error("❌ Failed to load data. Please check your connection and try again.")
+            return
         
-        # Calculate expected returns and covariance
-        mu = expected_returns.mean_historical_return(prices)
+        prices = data['close']
+        returns = data['returns']
+        benchmark_returns = benchmark_data['returns'].iloc[:, 0]
+    
+    # Portfolio Optimization
+    with st.spinner("⚡ Optimizing portfolio..."):
+        optimizer = EnhancedPortfolioOptimizer(prices, returns)
         
-        if cov_estimator == 'sample_cov':
-            S = risk_models.sample_cov(prices)
-        elif cov_estimator == 'ledoit_wolf':
-            S = risk_models.CovarianceShrinkage(prices).ledoit_wolf()
-        elif cov_estimator == 'oracle_approximating':
-            S = risk_models.CovarianceShrinkage(prices).oracle_approximating()
+        weights, performance = optimizer.optimize_portfolio(
+            method=optimization_method,
+            risk_model=risk_model,
+            return_model=return_model,
+            target_volatility=target_volatility,
+            target_return=target_return,
+            risk_free_rate=risk_free_rate
+        )
         
-        # Prepare constraints
-        constraints = {'min_weight': min_weight, 'max_weight': max_weight}
+        # Calculate portfolio returns
+        portfolio_returns = (returns * pd.Series(weights)).sum(axis=1)
+    
+    # Performance Metrics Dashboard
+    st.header("📈 Performance Dashboard")
+    
+    # Top Metrics Row
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    with col1:
+        st.metric("Expected Return", f"{performance[0]:.2%}")
+    with col2:
+        st.metric("Expected Volatility", f"{performance[1]:.2%}")
+    with col3:
+        st.metric("Sharpe Ratio", f"{performance[2]:.2f}")
+    with col4:
+        var_95 = np.percentile(portfolio_returns, 5)
+        st.metric("VaR (95%)", f"{var_95:.2%}")
+    with col5:
+        max_dd = qs.stats.max_drawdown(portfolio_returns) if HAS_QUANTSTATS else 0
+        st.metric("Max Drawdown", f"{max_dd:.2%}")
+    
+    # Main Tabs
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "🎯 Portfolio Overview", 
+        "📊 Optimization Analysis",
+        "⚠️ Risk Analytics", 
+        "📈 Performance Analytics",
+        "📑 Reports"
+    ])
+    
+    with tab1:
+        # Portfolio Overview
+        col_left, col_right = st.columns([1, 2])
         
-        # Prepare kwargs for optimization
-        kwargs = {}
-        if optimization_method in ['efficient_risk', 'efficient_return']:
-            kwargs['target_volatility' if optimization_method == 'efficient_risk' else 'target_return'] = target_value
-        if optimization_method == 'max_quadratic_utility':
-            kwargs['risk_aversion'] = risk_aversion
-        if optimization_method == 'resampling':
-            kwargs['n_simulations'] = n_simulations
-        
-        # Run optimization
-        with st.spinner("⚙️ Running portfolio optimization..."):
-            try:
-                # Optimize portfolio
-                weights_dict = st.session_state.optimizer.optimize_portfolio(
-                    optimization_method,
-                    mu,
-                    S,
-                    returns,
-                    constraints,
-                    **kwargs
-                )
-                
-                # Convert to numpy array
-                weights = np.array([weights_dict.get(ticker, 0) for ticker in returns.columns])
-                
-                # Calculate metrics
-                benchmark_for_metrics = benchmark_returns['XU100.IS'] if 'XU100.IS' in benchmark_returns.columns else None
-                metrics, portfolio_returns = st.session_state.optimizer.calculate_advanced_metrics(
-                    weights, returns, benchmark_for_metrics
-                )
-                
-                # Store results in session state
-                st.session_state.results = {
-                    'weights': weights_dict,
-                    'metrics': metrics,
-                    'portfolio_returns': portfolio_returns,
-                    'prices': prices,
-                    'returns': returns,
-                    'benchmark_returns': benchmark_returns
-                }
-                
-                st.success("✅ Analysis completed successfully!")
-                
-            except Exception as e:
-                st.error(f"❌ Error during optimization: {str(e)}")
-                st.exception(e)
-                return
-        
-        # Create tabs for different sections
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-            "📊 Executive Summary",
-            "📈 Portfolio Analysis",
-            "⚠️ Risk Analytics",
-            "🎯 Optimization",
-            "🔍 Advanced Diagnostics",
-            "📋 Performance Report",
-            "🔄 Backtesting"
-        ])
-        
-        # Get results
-        results = st.session_state.results
-        weights_dict = results['weights']
-        metrics = results['metrics']
-        portfolio_returns = results['portfolio_returns']
-        
-        # Tab 1: Executive Summary
-        with tab1:
-            st.markdown('<div class="sub-header">Executive Summary</div>', unsafe_allow_html=True)
+        with col_left:
+            st.subheader("Optimal Allocation")
             
-            # Key metrics cards
-            col1, col2, col3, col4 = st.columns(4)
+            # Convert weights to DataFrame
+            weights_df = pd.DataFrame.from_dict(weights, orient='index', columns=['Weight'])
+            weights_df = weights_df[weights_df['Weight'] > 0.001].sort_values('Weight', ascending=False)
             
-            with col1:
-                st.markdown('<div class="metric-card metric-card-success">', unsafe_allow_html=True)
-                st.metric(
-                    "Annual Return",
-                    f"{metrics.get('Annualized Return', 0):.2%}",
-                    f"Sharpe: {metrics.get('Sharpe Ratio', 0):.3f}"
-                )
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            with col2:
-                st.markdown('<div class="metric-card metric-card-warning">', unsafe_allow_html=True)
-                st.metric(
-                    "Annual Volatility",
-                    f"{metrics.get('Annualized Volatility', 0):.2%}",
-                    f"Max DD: {metrics.get('Maximum Drawdown', 0):.2%}"
-                )
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            with col3:
-                st.markdown('<div class="metric-card metric-card-info">', unsafe_allow_html=True)
-                st.metric(
-                    "Risk-Adjusted Return",
-                    f"{metrics.get('Sortino Ratio', 0):.3f}",
-                    f"Omega: {metrics.get('Omega Ratio', 0):.2f}"
-                )
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            with col4:
-                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                if 'Beta' in metrics and not np.isnan(metrics['Beta']):
-                    st.metric(
-                        "Market Exposure",
-                        f"β = {metrics['Beta']:.2f}",
-                        f"α = {metrics.get('Alpha (Jensen)', 0):.2%}"
-                    )
-                else:
-                    st.metric("Number of Assets", len(weights_dict), "In Portfolio")
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            # Portfolio composition
-            st.markdown('<div class="section-header">Portfolio Composition</div>', unsafe_allow_html=True)
-            
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                # Convert weights to DataFrame
-                weights_df = pd.DataFrame.from_dict(weights_dict, orient='index', columns=['Weight'])
-                weights_df = weights_df[weights_df['Weight'] > 0.001].sort_values('Weight', ascending=False)
-                
-                # Add company names
-                weights_df['Company'] = weights_df.index.map(BIST30_TICKERS)
-                weights_df['Sector'] = weights_df.index.map(
-                    lambda x: next((sector for sector, tickers in SECTOR_CLASSIFICATION.items() 
-                                  if x in tickers), 'Other')
-                )
-                
-                # Create pie chart
-                fig_pie = go.Figure(data=[go.Pie(
-                    labels=weights_df['Company'],
-                    values=weights_df['Weight'],
-                    hole=0.4,
-                    textinfo='label+percent',
-                    marker=dict(colors=px.colors.qualitative.Set3)
-                )])
-                
-                fig_pie.update_layout(
-                    title="Portfolio Weight Distribution",
-                    height=400,
-                    showlegend=False
-                )
-                
-                st.plotly_chart(fig_pie, use_container_width=True)
-            
-            with col2:
-                # Top holdings table
-                st.markdown("**Top 10 Holdings**")
-                top_holdings = weights_df.head(10).copy()
-                top_holdings['Weight'] = top_holdings['Weight'].map(lambda x: f"{x:.2%}")
-                
-                st.dataframe(
-                    top_holdings[['Company', 'Sector', 'Weight']],
-                    use_container_width=True,
-                    height=400
-                )
-                
-                # Concentration metrics
-                st.markdown("**Concentration Metrics**")
-                hhi = np.sum(weights_df['Weight'] ** 2)
-                gini = 1 - 2 * np.sum(np.cumsum(weights_df['Weight']) / weights_df['Weight'].sum()) / len(weights_df)
-                
-                col_met1, col_met2 = st.columns(2)
-                with col_met1:
-                    st.metric("HHI Index", f"{hhi:.4f}")
-                with col_met2:
-                    st.metric("Gini Coefficient", f"{gini:.3f}")
-        
-        # Tab 2: Portfolio Analysis
-        with tab2:
-            st.markdown('<div class="sub-header">Portfolio Performance Analysis</div>', unsafe_allow_html=True)
-            
-            # Create performance dashboard
-            dashboard_fig = st.session_state.visualizer.create_performance_dashboard(
-                portfolio_returns,
-                benchmark_returns['XU100.IS'] if 'XU100.IS' in benchmark_returns.columns else None,
-                metrics
+            # Pie chart
+            fig_pie = px.pie(
+                weights_df, 
+                values='Weight', 
+                names=weights_df.index,
+                hole=0.4,
+                color_discrete_sequence=px.colors.sequential.Viridis
             )
+            fig_pie.update_layout(template="plotly_dark", height=400)
+            st.plotly_chart(fig_pie, use_container_width=True)
             
-            st.plotly_chart(dashboard_fig, use_container_width=True)
-            
-            # Additional metrics
-            st.markdown('<div class="section-header">Detailed Performance Metrics</div>', unsafe_allow_html=True)
-            
-            # Create metrics tables
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Return metrics
-                return_metrics = {
-                    k: v for k, v in metrics.items()
-                    if 'Return' in k or 'Alpha' in k or 'Sharpe' in k or 'Sortino' in k
-                }
-                
-                st.markdown("**Return & Risk-Adjusted Metrics**")
-                return_df = pd.DataFrame.from_dict(return_metrics, orient='index', columns=['Value'])
-                st.dataframe(
-                    return_df.style.format({
-                        'Value': lambda x: f"{x:.2%}" if 'Return' in return_df.index[return_df.index.get_loc(x.name)] 
-                                          else f"{x:.3f}" if 'Sharpe' in x.name or 'Sortino' in x.name
-                                          else f"{x:.4f}"
-                    }),
-                    use_container_width=True
-                )
-            
-            with col2:
-                # Risk metrics
-                risk_metrics = {
-                    k: v for k, v in metrics.items()
-                    if 'Volatility' in k or 'VaR' in k or 'Drawdown' in k or 'Beta' in k
-                }
-                
-                st.markdown("**Risk Metrics**")
-                risk_df = pd.DataFrame.from_dict(risk_metrics, orient='index', columns=['Value'])
-                st.dataframe(
-                    risk_df.style.format({
-                        'Value': lambda x: f"{x:.2%}" if any(word in x.name for word in ['Volatility', 'VaR', 'Drawdown'])
-                                          else f"{x:.2f}" if 'Beta' in x.name
-                                          else f"{x:.4f}"
-                    }),
-                    use_container_width=True
-                )
-        
-        # Tab 3: Risk Analytics
-        with tab3:
-            st.markdown('<div class="sub-header">Advanced Risk Analytics</div>', unsafe_allow_html=True)
-            
-            # Risk decomposition
-            st.markdown('<div class="section-header">Risk Decomposition</div>', unsafe_allow_html=True)
-            
-            # Convert weights to array
-            weights_array = np.array([weights_dict.get(ticker, 0) for ticker in returns.columns])
-            
-            # Calculate covariance matrix
-            S_array = returns.cov().values
-            
-            # Create risk decomposition chart
-            risk_fig, risk_df = st.session_state.visualizer.create_risk_decomposition_chart(
-                weights_array, S_array, returns
-            )
-            
-            st.plotly_chart(risk_fig, use_container_width=True)
-            
-            # Display risk contribution table
-            st.markdown("**Detailed Risk Contributions**")
+            # Weights table
             st.dataframe(
-                risk_df.style.format({
-                    'Weight': '{:.2%}',
-                    'Risk Contribution': '{:.2f}%',
-                    'Marginal Risk': '{:.4f}'
-                }),
+                weights_df.style.format("{:.2%}").background_gradient(cmap='Blues'),
                 use_container_width=True
             )
             
-            # Correlation analysis
-            st.markdown('<div class="section-header">Correlation Analysis</div>', unsafe_allow_html=True)
+            # Discrete allocation if requested
+            if calculate_discrete:
+                st.subheader("Discrete Allocation")
+                allocation, leftover = optimizer.calculate_discrete_allocation(
+                    weights, portfolio_value
+                )
+                
+                alloc_df = pd.DataFrame.from_dict(allocation, orient='index', columns=['Shares'])
+                st.dataframe(alloc_df, use_container_width=True)
+                st.info(f"Remaining cash: ₺{leftover:,.2f}")
+        
+        with col_right:
+            st.subheader("Cumulative Performance")
             
-            # Create correlation network
-            corr_network_fig = st.session_state.visualizer.create_correlation_network(returns)
-            st.plotly_chart(corr_network_fig, use_container_width=True)
+            # Calculate cumulative returns
+            cum_port = (1 + portfolio_returns).cumprod()
+            cum_bench = (1 + benchmark_returns).cumprod()
             
-            # Correlation matrix
-            st.markdown("**Correlation Matrix**")
-            corr_matrix = returns.corr()
-            
-            fig_corr = go.Figure(data=go.Heatmap(
-                z=corr_matrix.values,
-                x=corr_matrix.columns,
-                y=corr_matrix.index,
-                colorscale='RdBu',
-                zmid=0,
-                zmin=-1,
-                zmax=1,
-                colorbar=dict(title="Correlation")
+            fig_cum = go.Figure()
+            fig_cum.add_trace(go.Scatter(
+                x=cum_port.index, y=cum_port.values,
+                name='Optimized Portfolio',
+                line=dict(color='#00cc88', width=3)
+            ))
+            fig_cum.add_trace(go.Scatter(
+                x=cum_bench.index, y=cum_bench.values,
+                name=benchmark_symbol,
+                line=dict(color='#0066cc', width=2, dash='dash')
             ))
             
-            fig_corr.update_layout(
-                title="Asset Correlation Matrix",
-                height=600,
-                xaxis_title="Assets",
-                yaxis_title="Assets"
+            fig_cum.update_layout(
+                template="plotly_dark",
+                height=500,
+                hovermode='x unified',
+                yaxis_title="Cumulative Return",
+                xaxis_title="Date"
+            )
+            st.plotly_chart(fig_cum, use_container_width=True)
+            
+            # Rolling metrics
+            st.subheader("Rolling Metrics (6M Window)")
+            
+            # Calculate rolling Sharpe and volatility
+            rolling_window = 126  # 6 months
+            
+            rolling_sharpe = portfolio_returns.rolling(rolling_window).apply(
+                lambda x: (x.mean() * 252) / (x.std() * np.sqrt(252)) if x.std() > 0 else 0
+            )
+            rolling_vol = portfolio_returns.rolling(rolling_window).std() * np.sqrt(252)
+            
+            fig_rolling = make_subplots(
+                rows=2, cols=1,
+                subplot_titles=('Rolling Sharpe Ratio', 'Rolling Volatility'),
+                vertical_spacing=0.15
             )
             
-            st.plotly_chart(fig_corr, use_container_width=True)
-        
-        # Tab 4: Optimization
-        with tab4:
-            st.markdown('<div class="sub-header">Portfolio Optimization Analysis</div>', unsafe_allow_html=True)
+            fig_rolling.add_trace(
+                go.Scatter(x=rolling_sharpe.index, y=rolling_sharpe.values,
+                          name='Sharpe', line=dict(color='green')),
+                row=1, col=1
+            )
+            fig_rolling.add_trace(
+                go.Scatter(x=rolling_vol.index, y=rolling_vol.values,
+                          name='Volatility', line=dict(color='red')),
+                row=2, col=1
+            )
             
-            # Efficient Frontier
-            st.markdown('<div class="section-header">Efficient Frontier Analysis</div>', unsafe_allow_html=True)
-            
-            # Create CLA object for efficient frontier
-            cla = CLA(mu, S)
-            
-            try:
-                # Get efficient frontier points
-                ef_points = cla.efficient_frontier(points=100)
-                
-                # Create efficient frontier plot
-                fig_ef = go.Figure()
-                
-                # Plot efficient frontier
-                frontier_vols = [point[1] * np.sqrt(TRADING_DAYS) * 100 for point in ef_points]
-                frontier_rets = [point[0] * TRADING_DAYS * 100 for point in ef_points]
-                
-                fig_ef.add_trace(go.Scatter(
-                    x=frontier_vols,
-                    y=frontier_rets,
-                    mode='lines',
-                    name='Efficient Frontier',
-                    line=dict(color='#3B82F6', width=3),
-                    fill='tozeroy',
-                    fillcolor='rgba(59, 130, 246, 0.1)'
-                ))
-                
-                # Plot individual assets
-                individual_rets = mu * TRADING_DAYS * 100
-                individual_vols = np.sqrt(np.diag(S) * TRADING_DAYS) * 100
-                
-                fig_ef.add_trace(go.Scatter(
-                    x=individual_vols,
-                    y=individual_rets,
-                    mode='markers',
-                    name='Individual Assets',
-                    marker=dict(size=8, color='#6B7280', opacity=0.6),
-                    text=returns.columns,
-                    hovertemplate="<b>%{text}</b><br>Return: %{y:.2f}%<br>Volatility: %{x:.2f}%"
-                ))
-                
-                # Plot optimized portfolio
-                portfolio_vol = metrics.get('Annualized Volatility', 0) * 100
-                portfolio_ret = metrics.get('Annualized Return', 0) * 100
-                
-                fig_ef.add_trace(go.Scatter(
-                    x=[portfolio_vol],
-                    y=[portfolio_ret],
-                    mode='markers',
-                    name='Optimized Portfolio',
-                    marker=dict(size=15, color='#10B981', line=dict(width=2, color='white')),
-                    hovertemplate=f"<b>Optimized Portfolio</b><br>Return: {portfolio_ret:.2f}%<br>Volatility: {portfolio_vol:.2f}%<br>Sharpe: {metrics.get('Sharpe Ratio', 0):.3f}"
-                ))
-                
-                fig_ef.update_layout(
-                    title="Efficient Frontier",
-                    xaxis_title="Annual Volatility (%)",
-                    yaxis_title="Annual Return (%)",
-                    height=600,
-                    template='plotly_white',
-                    hovermode='closest'
-                )
-                
-                st.plotly_chart(fig_ef, use_container_width=True)
-                
-            except Exception as e:
-                st.warning(f"Could not plot efficient frontier: {str(e)}")
-            
-            # Optimization comparison
-            st.markdown('<div class="section-header">Optimization Method Comparison</div>', unsafe_allow_html=True)
-            
-            # Compare different methods
-            methods_to_compare = ['max_sharpe', 'min_volatility', 'equal_weight', 'risk_parity', 'hrp']
-            
-            comparison_results = []
-            
-            with st.spinner("Comparing optimization methods..."):
-                for method in methods_to_compare:
-                    try:
-                        # Optimize with different method
-                        weights_compare = st.session_state.optimizer.optimize_portfolio(
-                            method, mu, S, returns, constraints
-                        )
-                        
-                        # Convert to array
-                        weights_array_compare = np.array([weights_compare.get(ticker, 0) for ticker in returns.columns])
-                        
-                        # Calculate metrics
-                        metrics_compare, _ = st.session_state.optimizer.calculate_advanced_metrics(
-                            weights_array_compare, returns, benchmark_returns['XU100.IS'] if 'XU100.IS' in benchmark_returns.columns else None
-                        )
-                        
-                        comparison_results.append({
-                            'Method': method.replace('_', ' ').title(),
-                            'Return': metrics_compare.get('Annualized Return', 0),
-                            'Volatility': metrics_compare.get('Annualized Volatility', 0),
-                            'Sharpe': metrics_compare.get('Sharpe Ratio', 0),
-                            'Sortino': metrics_compare.get('Sortino Ratio', 0),
-                            'Max DD': metrics_compare.get('Maximum Drawdown', 0),
-                            'Number of Assets': sum(1 for w in weights_compare.values() if w > 0.001)
-                        })
-                        
-                    except Exception as e:
-                        st.warning(f"Failed to optimize with {method}: {str(e)}")
-                
-                if comparison_results:
-                    compare_df = pd.DataFrame(comparison_results)
-                    
-                    # Display comparison table
-                    st.dataframe(
-                        compare_df.style.format({
-                            'Return': '{:.2%}',
-                            'Volatility': '{:.2%}',
-                            'Sharpe': '{:.3f}',
-                            'Sortino': '{:.3f}',
-                            'Max DD': '{:.2%}'
-                        }).background_gradient(subset=['Sharpe', 'Sortino'], cmap='RdYlGn')
-                        .background_gradient(subset=['Volatility', 'Max DD'], cmap='RdYlGn_r'),
-                        use_container_width=True
-                    )
-                    
-                    # Create radar chart for comparison
-                    categories = ['Return', 'Volatility', 'Sharpe', 'Sortino', 'Max DD']
-                    
-                    fig_radar = go.Figure()
-                    
-                    for idx, row in compare_df.iterrows():
-                        # Normalize values for radar chart
-                        values = [
-                            row['Return'] * 100,  # Convert to percentage
-                            row['Volatility'] * 100,
-                            row['Sharpe'] * 10,  # Scale for visibility
-                            row['Sortino'] * 10,
-                            abs(row['Max DD']) * 100  # Use absolute value
-                        ]
-                        
-                        fig_radar.add_trace(go.Scatterpolar(
-                            r=values,
-                            theta=categories,
-                            fill='toself',
-                            name=row['Method']
-                        ))
-                    
-                    fig_radar.update_layout(
-                        polar=dict(
-                            radialaxis=dict(
-                                visible=True,
-                                range=[0, 100]
-                            )),
-                        showlegend=True,
-                        title="Optimization Method Comparison",
-                        height=500
-                    )
-                    
-                    st.plotly_chart(fig_radar, use_container_width=True)
-        
-        # Tab 5: Advanced Diagnostics
-        with tab5:
-            st.markdown('<div class="sub-header">Advanced Quantitative Diagnostics</div>', unsafe_allow_html=True)
-            
-            # Market regime detection
-            st.markdown('<div class="section-header">Market Regime Analysis</div>', unsafe_allow_html=True)
-            
-            try:
-                # Detect regimes using GMM
-                regimes = st.session_state.optimizer._detect_regimes(portfolio_returns, n_regimes=3)
-                
-                if regimes is not None:
-                    # Plot regime detection
-                    fig_regime = go.Figure()
-                    
-                    # Color map for regimes
-                    colors = ['#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#3B82F6']
-                    
-                    for regime in sorted(regimes.unique()):
-                        regime_mask = regimes == regime
-                        regime_returns = portfolio_returns[regime_mask]
-                        
-                        fig_regime.add_trace(go.Scatter(
-                            x=regime_returns.index,
-                            y=regime_returns.values * 100,
-                            mode='markers',
-                            name=f'Regime {regime}',
-                            marker=dict(size=6, color=colors[regime % len(colors)]),
-                            opacity=0.7
-                        ))
-                    
-                    fig_regime.update_layout(
-                        title="Market Regime Detection",
-                        yaxis_title="Daily Return (%)",
-                        xaxis_title="Date",
-                        height=400,
-                        template='plotly_white'
-                    )
-                    
-                    st.plotly_chart(fig_regime, use_container_width=True)
-                    
-                    # Display regime statistics
-                    regime_stats = []
-                    for regime in sorted(regimes.unique()):
-                        regime_mask = regimes == regime
-                        regime_returns = portfolio_returns[regime_mask]
-                        
-                        regime_stats.append({
-                            'Regime': regime,
-                            'Days': len(regime_returns),
-                            'Percentage': len(regime_returns) / len(portfolio_returns) * 100,
-                            'Mean Return': regime_returns.mean() * 100,
-                            'Volatility': regime_returns.std() * 100 * np.sqrt(TRADING_DAYS),
-                            'Sharpe': (regime_returns.mean() * TRADING_DAYS - risk_free_rate) / 
-                                     (regime_returns.std() * np.sqrt(TRADING_DAYS)) if regime_returns.std() > 0 else 0
-                        })
-                    
-                    regime_df = pd.DataFrame(regime_stats)
-                    st.dataframe(
-                        regime_df.style.format({
-                            'Percentage': '{:.1f}%',
-                            'Mean Return': '{:.2f}%',
-                            'Volatility': '{:.2f}%',
-                            'Sharpe': '{:.3f}'
-                        }),
-                        use_container_width=True
-                    )
-            except Exception as e:
-                st.warning(f"Regime detection failed: {str(e)}")
-            
-            # Advanced statistical tests
-            st.markdown('<div class="section-header">Advanced Statistical Tests</div>', unsafe_allow_html=True)
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Normality tests
-                st.markdown("**Normality Tests**")
-                
-                # Jarque-Bera test
-                jb_stat, jb_pvalue = stats.jarque_bera(portfolio_returns)
-                
-                # Shapiro-Wilk test (for smaller samples)
-                if len(portfolio_returns) < 5000:
-                    shapiro_stat, shapiro_pvalue = stats.shapiro(portfolio_returns)
-                else:
-                    shapiro_stat, shapiro_pvalue = np.nan, np.nan
-                
-                # Anderson-Darling test
-                anderson_result = stats.anderson(portfolio_returns)
-                
-                normality_df = pd.DataFrame({
-                    'Test': ['Jarque-Bera', 'Shapiro-Wilk', 'Anderson-Darling'],
-                    'Statistic': [jb_stat, shapiro_stat, anderson_result.statistic],
-                    'p-value': [jb_pvalue, shapiro_pvalue, np.nan],
-                    'Critical Value (5%)': [np.nan, np.nan, anderson_result.critical_values[2]],
-                    'Result': [
-                        'Normal' if jb_pvalue > 0.05 else 'Not Normal',
-                        'Normal' if shapiro_pvalue > 0.05 else 'Not Normal',
-                        'Normal' if anderson_result.statistic < anderson_result.critical_values[2] else 'Not Normal'
-                    ]
-                })
-                
-                st.dataframe(normality_df, use_container_width=True)
-            
-            with col2:
-                # Stationarity tests
-                st.markdown("**Stationarity Tests**")
-                
-                # ADF test
-                adf_result = adfuller(portfolio_returns)
-                
-                # KPSS test
-                kpss_result = kpss(portfolio_returns)
-                
-                stationarity_df = pd.DataFrame({
-                    'Test': ['ADF', 'KPSS'],
-                    'Statistic': [adf_result[0], kpss_result[0]],
-                    'p-value': [adf_result[1], kpss_result[1]],
-                    'Critical Value (5%)': [adf_result[4]['5%'], kpss_result[3]['5%']],
-                    'Result': [
-                        'Stationary' if adf_result[1] < 0.05 else 'Non-Stationary',
-                        'Stationary' if kpss_result[1] > 0.05 else 'Non-Stationary'
-                    ]
-                })
-                
-                st.dataframe(stationarity_df, use_container_width=True)
-            
-            # Fractal analysis
-            st.markdown('<div class="section-header">Fractal & Complexity Analysis</div>', unsafe_allow_html=True)
-            
-            try:
-                # Calculate Hurst exponent
-                hurst = st.session_state.optimizer._calculate_hurst_exponent(portfolio_returns)
-                
-                # Calculate sample entropy
-                sample_entropy = st.session_state.optimizer._calculate_sample_entropy(portfolio_returns)
-                
-                # Calculate permutation entropy
-                perm_entropy = st.session_state.optimizer._calculate_permutation_entropy(portfolio_returns)
-                
-                fractal_df = pd.DataFrame({
-                    'Metric': ['Hurst Exponent', 'Sample Entropy', 'Permutation Entropy'],
-                    'Value': [hurst, sample_entropy, perm_entropy],
-                    'Interpretation': [
-                        'Trending (>0.5), Mean-reverting (<0.5), Random (=0.5)',
-                        'Higher = more complexity, Lower = more predictability',
-                        'Higher = more randomness, Lower = more order'
-                    ]
-                })
-                
-                st.dataframe(fractal_df, use_container_width=True)
-                
-                # Market efficiency indicator
-                if not np.isnan(hurst):
-                    efficiency = "Efficient" if abs(hurst - 0.5) < 0.1 else "Inefficient"
-                    st.info(f"**Market Efficiency:** {efficiency} (Hurst exponent = {hurst:.3f})")
-                    
-            except Exception as e:
-                st.warning(f"Fractal analysis failed: {str(e)}")
-        
-        # Tab 6: Performance Report
-        with tab6:
-            st.markdown('<div class="sub-header">Performance Report Generation</div>', unsafe_allow_html=True)
-            
-            # Generate comprehensive report
-            st.markdown("### 📋 Generate Professional Report")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Report options
-                report_type = st.selectbox(
-                    "Report Type",
-                    ["Executive Summary", "Comprehensive Analysis", "Risk Report", "Performance Attribution"]
-                )
-                
-                include_charts = st.checkbox("Include Charts", value=True)
-                include_tables = st.checkbox("Include Detailed Tables", value=True)
-                include_recommendations = st.checkbox("Include Recommendations", value=True)
-            
-            with col2:
-                # Export options
-                export_format = st.selectbox(
-                    "Export Format",
-                    ["PDF", "Excel", "HTML", "JSON"]
-                )
-                
-                filename = st.text_input(
-                    "Filename",
-                    value=f"portfolio_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                )
-            
-            # Generate report button
-            if st.button("📥 Generate Report", type="primary", use_container_width=True):
-                with st.spinner("Generating report..."):
-                    try:
-                        # Generate PDF report
-                        report_filename = PortfolioReportGenerator.generate_pdf_report(
-                            metrics,
-                            weights_dict,
-                            portfolio_returns,
-                            benchmark_returns['XU100.IS'] if 'XU100.IS' in benchmark_returns.columns else None,
-                            filename=f"{filename}.pdf"
-                        )
-                        
-                        # Read the generated PDF
-                        with open(report_filename, "rb") as f:
-                            pdf_bytes = f.read()
-                        
-                        # Create download button
-                        st.download_button(
-                            label="📄 Download PDF Report",
-                            data=pdf_bytes,
-                            file_name=report_filename,
-                            mime="application/pdf",
-                            use_container_width=True
-                        )
-                        
-                        st.success("✅ Report generated successfully!")
-                        
-                    except Exception as e:
-                        st.error(f"❌ Error generating report: {str(e)}")
-            
-            # Display export options for other formats
-            st.markdown("### 📊 Export Data")
-            
-            col_exp1, col_exp2, col_exp3 = st.columns(3)
-            
-            with col_exp1:
-                # Export weights to CSV
-                weights_df = pd.DataFrame.from_dict(weights_dict, orient='index', columns=['Weight'])
-                weights_csv = weights_df.to_csv()
-                
-                st.download_button(
-                    label="📥 Export Weights (CSV)",
-                    data=weights_csv,
-                    file_name=f"portfolio_weights_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-            
-            with col_exp2:
-                # Export metrics to CSV
-                metrics_df = pd.DataFrame.from_dict(metrics, orient='index', columns=['Value'])
-                metrics_csv = metrics_df.to_csv()
-                
-                st.download_button(
-                    label="📥 Export Metrics (CSV)",
-                    data=metrics_csv,
-                    file_name=f"portfolio_metrics_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-            
-            with col_exp3:
-                # Export returns to CSV
-                returns_df = pd.DataFrame({
-                    'Portfolio_Returns': portfolio_returns,
-                    'Benchmark_Returns': benchmark_returns['XU100.IS'] if 'XU100.IS' in benchmark_returns.columns else np.nan
-                })
-                returns_csv = returns_df.to_csv()
-                
-                st.download_button(
-                    label="📥 Export Returns (CSV)",
-                    data=returns_csv,
-                    file_name=f"portfolio_returns_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-        
-        # Tab 7: Backtesting
-        with tab7:
-            st.markdown('<div class="sub-header">Portfolio Backtesting</div>', unsafe_allow_html=True)
-            
-            # Backtesting parameters
-            st.markdown("### ⚙️ Backtesting Configuration")
-            
-            col_bt1, col_bt2, col_bt3 = st.columns(3)
-            
-            with col_bt1:
-                backtest_period = st.selectbox(
-                    "Backtest Period",
-                    ["1 Year", "2 Years", "3 Years", "5 Years", "Custom"]
-                )
-                
-                if backtest_period == "Custom":
-                    bt_start_date = st.date_input("Start Date", datetime.now() - timedelta(days=365))
-                    bt_end_date = st.date_input("End Date", datetime.now())
-            
-            with col_bt2:
-                rebalance_frequency = st.selectbox(
-                    "Rebalance Frequency",
-                    ["Monthly", "Quarterly", "Semi-Annually", "Annually", "Never"]
-                )
-                
-                transaction_costs = st.number_input(
-                    "Transaction Costs (%)",
-                    min_value=0.0,
-                    max_value=5.0,
-                    value=0.1,
-                    step=0.05
-                ) / 100
-            
-            with col_bt3:
-                initial_capital = st.number_input(
-                    "Initial Capital (TRY)",
-                    min_value=1000,
-                    max_value=1000000000,
-                    value=1000000,
-                    step=10000
-                )
-                
-                include_dividends = st.checkbox("Include Dividends", value=False)
-            
-            # Run backtest button
-            if st.button("🔁 Run Backtest", type="primary", use_container_width=True):
-                with st.spinner("Running backtest..."):
-                    try:
-                        # This is a placeholder for backtesting logic
-                        # In a full implementation, you would:
-                        # 1. Split data into training and testing periods
-                        # 2. Optimize portfolio on training data
-                        # 3. Test on out-of-sample data
-                        # 4. Calculate performance metrics
-                        # 5. Compare with benchmark
-                        
-                        st.info("Backtesting feature is under development. Coming soon!")
-                        
-                        # Placeholder for backtest results
-                        backtest_results = {
-                            'Period': backtest_period,
-                            'Total Return': 0.25,
-                            'Annualized Return': 0.12,
-                            'Annualized Volatility': 0.18,
-                            'Max Drawdown': -0.15,
-                            'Sharpe Ratio': 0.67,
-                            'Win Rate': 0.55,
-                            'Best Month': 0.08,
-                            'Worst Month': -0.06
-                        }
-                        
-                        # Display backtest results
-                        st.markdown("### 📊 Backtest Results")
-                        
-                        # Create metrics cards for backtest
-                        col_bt_res1, col_bt_res2, col_bt_res3, col_bt_res4 = st.columns(4)
-                        
-                        with col_bt_res1:
-                            st.metric(
-                                "Total Return",
-                                f"{backtest_results['Total Return']:.2%}",
-                                f"Annualized: {backtest_results['Annualized Return']:.2%}"
-                            )
-                        
-                        with col_bt_res2:
-                            st.metric(
-                                "Risk-Adjusted Return",
-                                f"Sharpe: {backtest_results['Sharpe Ratio']:.2f}",
-                                f"Win Rate: {backtest_results['Win Rate']:.2%}"
-                            )
-                        
-                        with col_bt_res3:
-                            st.metric(
-                                "Risk Metrics",
-                                f"Volatility: {backtest_results['Annualized Volatility']:.2%}",
-                                f"Max DD: {backtest_results['Max Drawdown']:.2%}"
-                            )
-                        
-                        with col_bt_res4:
-                            st.metric(
-                                "Monthly Performance",
-                                f"Best: {backtest_results['Best Month']:.2%}",
-                                f"Worst: {backtest_results['Worst Month']:.2%}"
-                            )
-                        
-                    except Exception as e:
-                        st.error(f"❌ Backtesting failed: {str(e)}")
+            fig_rolling.update_layout(height=400, template="plotly_dark", showlegend=False)
+            st.plotly_chart(fig_rolling, use_container_width=True)
     
-    else:
-        # Welcome screen
-        if not st.session_state.data_loaded:
-            st.markdown("## 🎯 Welcome to BIST Portfolio Analytics")
+    with tab2:
+        # Optimization Analysis
+        st.subheader("Efficient Frontier Analysis")
+        
+        # Generate efficient frontier
+        mus, sigmas, frontier_weights = optimizer.generate_efficient_frontier()
+        
+        fig_frontier = go.Figure()
+        
+        # Plot frontier
+        fig_frontier.add_trace(go.Scatter(
+            x=sigmas, y=mus,
+            mode='lines',
+            name='Efficient Frontier',
+            line=dict(color='white', width=2)
+        ))
+        
+        # Plot optimal point
+        fig_frontier.add_trace(go.Scatter(
+            x=[performance[1]], y=[performance[0]],
+            mode='markers',
+            marker=dict(color='red', size=15, symbol='star'),
+            name='Optimal Portfolio'
+        ))
+        
+        # Plot individual assets
+        for i, asset in enumerate(prices.columns):
+            mu_i = expected_returns.mean_historical_return(prices[asset])
+            sigma_i = np.sqrt(risk_models.sample_cov(returns[asset].to_frame()).iloc[0,0]) * np.sqrt(252)
             
-            col_welcome1, col_welcome2 = st.columns([2, 1])
+            fig_frontier.add_trace(go.Scatter(
+                x=[sigma_i], y=[mu_i],
+                mode='markers+text',
+                marker=dict(size=10),
+                text=[asset],
+                textposition="top center",
+                name=asset,
+                showlegend=False
+            ))
+        
+        fig_frontier.update_layout(
+            template="plotly_dark",
+            height=500,
+            xaxis_title="Annualized Volatility",
+            yaxis_title="Annualized Return",
+            title="Efficient Frontier with Individual Assets"
+        )
+        
+        st.plotly_chart(fig_frontier, use_container_width=True)
+        
+        # Weight sensitivity analysis
+        st.subheader("Weight Sensitivity Analysis")
+        
+        # Create sensitivity analysis
+        sensitivity_results = []
+        base_weights = pd.Series(weights)
+        
+        for asset in base_weights.index:
+            if base_weights[asset] > 0:
+                # Vary weight and calculate impact
+                weight_variations = np.linspace(
+                    max(0, base_weights[asset] - 0.1),
+                    min(1, base_weights[asset] + 0.1),
+                    20
+                )
+                
+                for w in weight_variations:
+                    adjusted_weights = base_weights.copy()
+                    adjusted_weights[asset] = w
+                    # Renormalize
+                    adjusted_weights = adjusted_weights / adjusted_weights.sum()
+                    
+                    # Calculate portfolio metrics
+                    port_ret = (returns * adjusted_weights).sum(axis=1)
+                    ann_ret = (1 + port_ret.mean()) ** 252 - 1
+                    ann_vol = port_ret.std() * np.sqrt(252)
+                    sharpe = (ann_ret - risk_free_rate) / ann_vol if ann_vol > 0 else 0
+                    
+                    sensitivity_results.append({
+                        'Asset': asset,
+                        'Weight': w,
+                        'Return': ann_ret,
+                        'Volatility': ann_vol,
+                        'Sharpe': sharpe
+                    })
+        
+        sensitivity_df = pd.DataFrame(sensitivity_results)
+        
+        # Plot sensitivity
+        if not sensitivity_df.empty:
+            fig_sensitivity = px.scatter(
+                sensitivity_df,
+                x='Volatility',
+                y='Return',
+                color='Asset',
+                size='Weight',
+                hover_data=['Sharpe'],
+                title='Weight Sensitivity Analysis'
+            )
+            fig_sensitivity.update_layout(template="plotly_dark", height=500)
+            st.plotly_chart(fig_sensitivity, use_container_width=True)
+    
+    with tab3:
+        # Risk Analytics
+        st.header("⚠️ Comprehensive Risk Analysis")
+        
+        risk_analytics = RiskAnalytics(portfolio_returns, benchmark_returns)
+        
+        col_risk1, col_risk2 = st.columns(2)
+        
+        with col_risk1:
+            st.subheader("Value at Risk Analysis")
             
-            with col_welcome1:
-                st.markdown("""
-                ### **Get Started:**
-                
-                1. **Configure Parameters** in the sidebar
-                2. **Fetch Market Data** using the button
-                3. **Run Portfolio Analysis** once data is loaded
-                
-                ### **Available Features:**
-                
-                📊 **Portfolio Optimization**
-                - 14 different optimization methods
-                - Mean-variance optimization
-                - Risk parity & hierarchical risk parity
-                - Black-Litterman model
-                - Bayesian optimization
-                
-                ⚠️ **Risk Analytics**
-                - Value at Risk (VaR) & Conditional VaR (CVaR)
-                - Stress testing & scenario analysis
-                - Correlation networks
-                - Risk decomposition
-                
-                🔍 **Advanced Diagnostics**
-                - Market regime detection
-                - Fractal analysis (Hurst exponent)
-                - Entropy measures
-                - Statistical tests
-                
-                📈 **Professional Reporting**
-                - Comprehensive performance metrics
-                - Export to PDF/Excel/CSV
-                - Interactive visualizations
-                
-                ### **Supported Assets:**
-                - All BIST 30 constituents
-                - Multiple benchmark indices
-                - FX rates & commodities
-                """)
+            # Calculate VaR/CVaR at different confidence levels
+            var_results = risk_analytics.calculate_var_cvar([0.90, 0.95, 0.99])
             
-            with col_welcome2:
-                # Feature cards
-                st.markdown('<div class="metric-card metric-card-info">', unsafe_allow_html=True)
-                st.markdown("### 📈 **14 Optimization Methods**")
-                st.markdown("From traditional mean-variance to advanced ML techniques")
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-                st.markdown('<div class="metric-card metric-card-success">', unsafe_allow_html=True)
-                st.markdown("### ⚠️ **50+ Risk Metrics**")
-                st.markdown("Comprehensive risk assessment with advanced analytics")
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-                st.markdown('<div class="metric-card metric-card-warning">', unsafe_allow_html=True)
-                st.markdown("### 🔍 **ML-Powered Insights**")
-                st.markdown("Market regime detection, entropy analysis, fractal metrics")
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                st.markdown("### 📋 **Professional Reports**")
-                st.markdown("Export-ready PDF reports with executive summaries")
-                st.markdown('</div>', unsafe_allow_html=True)
+            var_df = pd.DataFrame({
+                'Confidence Level': ['90%', '95%', '99%'],
+                'Historical VaR': [var_results['VaR_90']['Historical'], 
+                                  var_results['VaR_95']['Historical'], 
+                                  var_results['VaR_99']['Historical']],
+                'Parametric VaR': [var_results['VaR_90']['Parametric'], 
+                                  var_results['VaR_95']['Parametric'], 
+                                  var_results['VaR_99']['Parametric']],
+                'CVaR': [var_results['VaR_90']['CVaR_Historical'], 
+                        var_results['VaR_95']['CVaR_Historical'], 
+                        var_results['VaR_99']['CVaR_Historical']]
+            })
             
-            # Quick start guide
-            with st.expander("🚀 Quick Start Guide", expanded=True):
-                st.markdown("""
-                **Step 1: Data Configuration**
-                - Select date range (minimum 1 year recommended)
-                - Choose data frequency (daily recommended)
-                - Include benchmarks for comparison
-                
-                **Step 2: Optimization Setup**
-                - Select optimization method (Max Sharpe for beginners)
-                - Set risk-free rate (current: 45% for Turkey)
-                - Configure portfolio constraints
-                
-                **Step 3: Analysis & Reporting**
-                - Review portfolio composition
-                - Analyze risk metrics
-                - Generate professional reports
-                - Export results for further analysis
-                
-                **Pro Tips:**
-                - Use longer time periods for more stable estimates
-                - Consider transaction costs in backtesting
-                - Regularly update risk-free rate based on market conditions
-                - Use multiple optimization methods for comparison
-                """)
+            st.dataframe(
+                var_df.style.format("{:.4f}").background_gradient(cmap='Reds_r', subset=['Historical VaR', 'CVaR']),
+                use_container_width=True
+            )
+            
+            # Risk decomposition
+            st.subheader("Risk Decomposition")
+            
+            S = risk_models.CovarianceShrinkage(prices).ledoit_wolf().values
+            w_array = np.array([weights.get(asset, 0) for asset in prices.columns])
+            
+            risk_decomp = risk_analytics.calculate_risk_decomposition(w_array, S)
+            
+            decomp_df = pd.DataFrame({
+                'Asset': prices.columns,
+                'Weight': w_array,
+                'Marginal Contribution': risk_decomp['marginal_contribution'],
+                'Percent Contribution': risk_decomp['percent_contribution']
+            }).sort_values('Percent Contribution', ascending=False)
+            
+            st.dataframe(
+                decomp_df.style.format({
+                    'Weight': '{:.2%}',
+                    'Marginal Contribution': '{:.6f}',
+                    'Percent Contribution': '{:.2%}'
+                }).background_gradient(cmap='YlOrRd', subset=['Percent Contribution']),
+                use_container_width=True
+            )
+        
+        with col_risk2:
+            st.subheader("Drawdown Analysis")
+            
+            # Calculate drawdown series
+            drawdown_series = qs.stats.to_drawdown_series(portfolio_returns)
+            
+            fig_dd = go.Figure()
+            fig_dd.add_trace(go.Scatter(
+                x=drawdown_series.index,
+                y=drawdown_series.values,
+                fill='tozeroy',
+                fillcolor='rgba(255, 0, 0, 0.3)',
+                line=dict(color='red'),
+                name='Drawdown'
+            ))
+            
+            # Add max drawdown line
+            max_dd_point = drawdown_series.idxmin()
+            max_dd_value = drawdown_series.min()
+            
+            fig_dd.add_vline(
+                x=max_dd_point,
+                line_dash="dash",
+                line_color="yellow",
+                annotation_text=f"Max DD: {max_dd_value:.2%}"
+            )
+            
+            fig_dd.update_layout(
+                template="plotly_dark",
+                height=400,
+                title="Portfolio Drawdown",
+                yaxis_title="Drawdown",
+                yaxis_tickformat=".2%"
+            )
+            
+            st.plotly_chart(fig_dd, use_container_width=True)
+            
+            # Drawdown statistics
+            dd_stats = {
+                'Max Drawdown': max_dd_value,
+                'Avg Drawdown': drawdown_series.mean(),
+                'Drawdown Duration (days)': qs.stats.max_duration(portfolio_returns),
+                'Recovery Time (days)': qs.stats.time_to_recovery(portfolio_returns)
+            }
+            
+            dd_stats_df = pd.DataFrame.from_dict(dd_stats, orient='index', columns=['Value'])
+            st.dataframe(dd_stats_df.style.format("{:.4f}"), use_container_width=True)
+            
+            # Tail Risk Analysis
+            st.subheader("Tail Risk Analysis")
+            
+            # Calculate exceedances
+            var_95 = np.percentile(portfolio_returns, 5)
+            exceedances = portfolio_returns[portfolio_returns <= var_95]
+            
+            tail_stats = {
+                'Tail Losses Count': len(exceedances),
+                'Average Tail Loss': exceedances.mean(),
+                'Worst Tail Loss': exceedances.min(),
+                'Tail to Volatility Ratio': abs(exceedances.mean()) / portfolio_returns.std()
+            }
+            
+            tail_df = pd.DataFrame.from_dict(tail_stats, orient='index', columns=['Value'])
+            st.dataframe(tail_df.style.format("{:.4f}"), use_container_width=True)
+    
+    with tab4:
+        # Performance Analytics with QuantStats
+        st.header("📈 Advanced Performance Analytics")
+        
+        # Initialize QuantStats analytics
+        qs_analytics = QuantStatsAnalytics(
+            portfolio_returns,
+            benchmark_returns,
+            risk_free_rate
+        )
+        
+        # Calculate advanced metrics
+        advanced_metrics = qs_analytics.calculate_advanced_metrics()
+        
+        # Display metrics in columns
+        metrics_cols = st.columns(4)
+        metric_items = list(advanced_metrics.items())
+        
+        for idx, (key, value) in enumerate(metric_items[:16]):  # Show first 16 metrics
+            with metrics_cols[idx % 4]:
+                try:
+                    if isinstance(value, (int, float)):
+                        if 'Ratio' in key or 'Sharpe' in key or 'Beta' in key:
+                            display_val = f"{value:.2f}"
+                        elif 'Return' in key or 'Drawdown' in key:
+                            display_val = f"{value:.2%}"
+                        else:
+                            display_val = f"{value:.4f}"
+                        st.metric(key, display_val)
+                except:
+                    pass
+        
+        # Generate tearsheet if requested
+        if show_tearsheet and HAS_QUANTSTATS:
+            st.subheader("Interactive Tearsheet")
+            
+            tearsheet_fig = qs_analytics.generate_tearsheet()
+            if tearsheet_fig:
+                st.plotly_chart(tearsheet_fig, use_container_width=True)
+        
+        # Monthly Returns Heatmap
+        st.subheader("Monthly Returns Heatmap")
+        
+        monthly_returns = portfolio_returns.resample('M').apply(lambda x: (1+x).prod()-1)
+        monthly_df = pd.DataFrame({
+            'Year': monthly_returns.index.year,
+            'Month': monthly_returns.index.strftime('%b'),
+            'Return': monthly_returns.values
+        })
+        
+        # Create pivot table for heatmap
+        monthly_pivot = monthly_df.pivot(index='Year', columns='Month', values='Return')
+        
+        # Ensure correct month order
+        month_order = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+        monthly_pivot = monthly_pivot.reindex(columns=month_order)
+        
+        # Create heatmap
+        fig_heatmap = px.imshow(
+            monthly_pivot,
+            text_auto='.2%',
+            color_continuous_scale='RdBu_r',
+            aspect='auto',
+            title='Monthly Returns Heatmap'
+        )
+        fig_heatmap.update_layout(template="plotly_dark", height=400)
+        st.plotly_chart(fig_heatmap, use_container_width=True)
+        
+        # Return Distribution with VaR
+        st.subheader("Return Distribution Analysis")
+        
+        fig_dist = ff.create_distplot(
+            [portfolio_returns.values, benchmark_returns.values],
+            ['Portfolio', 'Benchmark'],
+            bin_size=0.001,
+            show_rug=False,
+            colors=['#00cc88', '#0066cc']
+        )
+        
+        # Add VaR lines
+        var_95_port = np.percentile(portfolio_returns, 5)
+        var_95_bench = np.percentile(benchmark_returns, 5)
+        
+        fig_dist.add_vline(
+            x=var_95_port,
+            line_dash="dash",
+            line_color="red",
+            annotation_text=f"Port VaR 95%: {var_95_port:.2%}"
+        )
+        
+        fig_dist.add_vline(
+            x=var_95_bench,
+            line_dash="dash",
+            line_color="orange",
+            annotation_text=f"Bench VaR 95%: {var_95_bench:.2%}"
+        )
+        
+        fig_dist.update_layout(
+            template="plotly_dark",
+            height=500,
+            title="Return Distribution with VaR Levels",
+            xaxis_title="Daily Returns",
+            yaxis_title="Density"
+        )
+        
+        st.plotly_chart(fig_dist, use_container_width=True)
+    
+    with tab5:
+        # Reporting Section
+        st.header("📑 Professional Reporting")
+        
+        # QuantStats Full Report
+        if generate_full_report and HAS_QUANTSTATS:
+            st.subheader("QuantStats Full Report")
+            
+            if st.button("Generate QuantStats HTML Report", type="primary"):
+                with st.spinner("Generating comprehensive report..."):
+                    qs_report = qs_analytics.generate_full_report('full')
+                    
+                    if qs_report:
+                        # Display in expander
+                        with st.expander("View HTML Report", expanded=True):
+                            st.components.v1.html(qs_report, height=1000, scrolling=True)
+                        
+                        # Download button
+                        b64 = base64.b64encode(qs_report.encode()).decode()
+                        href = f'''
+                        <a href="data:text/html;base64,{b64}" 
+                           download="quantstats_report.html" 
+                           class="stButton">
+                           📥 Download HTML Report
+                        </a>
+                        '''
+                        st.markdown(href, unsafe_allow_html=True)
+        
+        # Performance Summary Card
+        st.subheader("Performance Summary")
+        
+        summary_cols = st.columns(3)
+        
+        with summary_cols[0]:
+            st.info("**Return Metrics**")
+            st.metric("CAGR", f"{performance[0]:.2%}")
+            st.metric("Total Return", 
+                     f"{((1 + portfolio_returns).prod() - 1):.2%}")
+        
+        with summary_cols[1]:
+            st.info("**Risk Metrics**")
+            st.metric("Annual Vol", f"{performance[1]:.2%}")
+            st.metric("Sharpe Ratio", f"{performance[2]:.2f}")
+            st.metric("Sortino Ratio", 
+                     f"{qs.stats.sortino(portfolio_returns, risk_free_rate):.2f}" 
+                     if HAS_QUANTSTATS else "N/A")
+        
+        with summary_cols[2]:
+            st.info("**Risk-Adjusted Metrics**")
+            st.metric("Calmar Ratio", 
+                     f"{qs.stats.calmar(portfolio_returns):.2f}" 
+                     if HAS_QUANTSTATS else "N/A")
+            st.metric("Omega Ratio", 
+                     f"{qs.stats.omega(portfolio_returns, risk_free_rate):.2f}" 
+                     if HAS_QUANTSTATS else "N/A")
+            st.metric("Information Ratio", 
+                     f"{qs.stats.information_ratio(portfolio_returns, benchmark_returns):.2f}" 
+                     if HAS_QUANTSTATS and benchmark_returns is not None else "N/A")
+        
+        # Export Data
+        st.subheader("Data Export")
+        
+        export_cols = st.columns(4)
+        
+        with export_cols[0]:
+            if st.button("Export Weights CSV"):
+                weights_df = pd.DataFrame.from_dict(weights, orient='index', 
+                                                  columns=['Weight'])
+                csv = weights_df.to_csv()
+                b64 = base64.b64encode(csv.encode()).decode()
+                href = f'<a href="data:file/csv;base64,{b64}" download="portfolio_weights.csv">Download Weights</a>'
+                st.markdown(href, unsafe_allow_html=True)
+        
+        with export_cols[1]:
+            if st.button("Export Returns CSV"):
+                returns_df = pd.DataFrame({
+                    'Portfolio': portfolio_returns,
+                    'Benchmark': benchmark_returns
+                })
+                csv = returns_df.to_csv()
+                b64 = base64.b64encode(csv.encode()).decode()
+                href = f'<a href="data:file/csv;base64,{b64}" download="returns_data.csv">Download Returns</a>'
+                st.markdown(href, unsafe_allow_html=True)
+        
+        with export_cols[2]:
+            if st.button("Export Performance Metrics"):
+                metrics_df = pd.DataFrame.from_dict(advanced_metrics, 
+                                                  orient='index', 
+                                                  columns=['Value'])
+                csv = metrics_df.to_csv()
+                b64 = base64.b64encode(csv.encode()).decode()
+                href = f'<a href="data:file/csv;base64,{b64}" download="performance_metrics.csv">Download Metrics</a>'
+                st.markdown(href, unsafe_allow_html=True)
+        
+        # Configuration Log
+        with st.expander("View Configuration Log"):
+            config_log = {
+                'Date Range': f"{start_date} to {end_date}",
+                'Assets Selected': assets,
+                'Benchmark': benchmark_symbol,
+                'Optimization Method': optimization_method,
+                'Risk Model': risk_model,
+                'Return Model': return_model,
+                'Risk Free Rate': f"{risk_free_rate:.2%}",
+                'Target Volatility': f"{target_volatility:.2%}" if optimization_method == 'efficient_risk' else 'N/A',
+                'Target Return': f"{target_return:.2%}" if optimization_method == 'efficient_return' else 'N/A'
+            }
+            
+            st.json(config_log)
 
 if __name__ == "__main__":
-    # Run the app
-    try:
-        main()
-    except Exception as e:
-        st.error(f"An unexpected error occurred: {str(e)}")
-        st.exception(e)
+    main()
